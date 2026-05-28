@@ -21,6 +21,7 @@ MAX_STEPS = CONFIG_MAX_STEPS
 MAX_BLOCKED_CYCLES = 3
 
 STATE_INIT = "INIT"
+STATE_ANALYZE = "ANALYZE"
 STATE_PLAN = "PLAN"
 STATE_EXECUTE = "EXECUTE"
 STATE_VERIFY = "VERIFY"
@@ -136,6 +137,7 @@ def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
             "percent": 0,
         },
         "task": task,
+        "task_analysis": None,
         "status": "running",
         "created_at": _now_iso(),
         "updated_at": _now_iso(),
@@ -144,6 +146,7 @@ def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
         "continuous_run": CONTINUOUS_RUN,
         "use_planner": use_planner,
         "state": STATE_INIT,
+        "analysis_round": 0,
         "cycle": 1,
         "step_in_cycle": 0,
         "total_steps": 0,
@@ -258,15 +261,121 @@ def _reset_cycle(memory: dict[str, Any], reason: str) -> bool:
     memory["last_verification"] = {
         "status": "continue",
         "reason": reason,
-        "next_step": "replan",
+        "next_step": "reanalyze",
     }
-    _set_state(memory, STATE_PLAN, status="running")
+    _set_state(memory, STATE_ANALYZE, status="running")
     return memory["cycles_without_progress"] >= MAX_BLOCKED_CYCLES
+
+
+def _normalize_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
+    uncertainty = str(analysis.get("uncertainty", "medium")).lower()
+    if uncertainty not in {"low", "medium", "high"}:
+        uncertainty = "medium"
+
+    key_unknowns = analysis.get("key_unknowns", [])
+    if not isinstance(key_unknowns, list):
+        key_unknowns = [key_unknowns]
+
+    success_criteria = analysis.get("success_criteria", [])
+    if not isinstance(success_criteria, list):
+        success_criteria = [success_criteria]
+
+    recommended_actions = analysis.get("recommended_actions", [])
+    if not isinstance(recommended_actions, list):
+        recommended_actions = [recommended_actions]
+
+    return {
+        "summary": str(analysis.get("summary", "")),
+        "goal": str(analysis.get("goal", "")),
+        "uncertainty": uncertainty,
+        "key_unknowns": [str(item) for item in key_unknowns if str(item).strip()],
+        "success_criteria": [str(item) for item in success_criteria if str(item).strip()],
+        "recommended_actions": [str(item) for item in recommended_actions if str(item).strip()],
+        "recommended_focus": str(analysis.get("recommended_focus", "")),
+        "next_step": str(analysis.get("next_step", "")),
+    }
+
+
+def _fallback_analysis(task: str, memory: dict[str, Any]) -> dict[str, Any]:
+    current_context = get_context_summary(memory)
+    return _normalize_analysis(
+        {
+            "summary": task.strip(),
+            "goal": task.strip(),
+            "uncertainty": "high" if memory.get("cycle", 1) == 1 else "medium",
+            "key_unknowns": [
+                "Inspect the repository structure before modifying files.",
+                "Identify the safest entrypoints and outputs for the task.",
+            ],
+            "success_criteria": [
+                "The requested task is implemented.",
+                "The result is validated through tool execution.",
+            ],
+            "recommended_actions": [
+                "Inspect the repository with read-only tools.",
+                "Plan the minimal change set.",
+                "Execute and verify incrementally.",
+            ],
+            "recommended_focus": current_context,
+            "next_step": "inspect the repository and form an execution plan",
+        }
+    )
+
+
+def _build_analysis_prompt(task: str, memory: dict[str, Any]) -> str:
+    context = get_context_summary(memory)
+    return f"""{SYSTEM_PROMPT}
+
+Tu es en phase d'analyse autonome.
+Analyse la tâche, le dépôt et le contexte courant avant d'agir.
+
+Task utilisateur:
+{task}
+
+Cycle actuel:
+{memory.get("cycle", 1)}
+
+Contexte courant:
+{context}
+
+Derniere analyse:
+{_short(memory.get("task_analysis"))}
+
+Derniere action:
+{_short(memory.get("last_action"))}
+
+Dernier resultat:
+{_short(memory.get("last_result"))}
+
+Reponds uniquement en JSON:
+{{
+  "summary": "...",
+  "goal": "...",
+  "uncertainty": "low | medium | high",
+  "key_unknowns": ["..."],
+  "success_criteria": ["..."],
+  "recommended_actions": ["..."],
+  "recommended_focus": "...",
+  "next_step": "..."
+}}
+"""
+
+
+def _request_analysis(task: str, memory: dict[str, Any]) -> dict[str, Any]:
+    raw_output = call_llm(_build_analysis_prompt(task, memory))
+    memory["last_analysis_output"] = raw_output
+    parsed = parse_action(raw_output)
+    if isinstance(parsed, dict):
+        return _normalize_analysis(parsed)
+
+    logger.warning("Analysis JSON invalid, using fallback heuristic analysis")
+    return _fallback_analysis(task, memory)
 
 
 def _build_action_prompt(task: str, memory: dict[str, Any]) -> str:
     state = memory.get("state", STATE_EXECUTE)
     context = get_context_summary(memory)
+    task_analysis = _short(memory.get("task_analysis"))
     strategy_change_required = memory.get("strategy_change_required", False)
     blocked_retry = memory.get("blocked_retry") or {}
     if state == STATE_FIX and strategy_change_required:
@@ -295,6 +404,12 @@ Plan courant:
 
 Contexte courant:
 {context}
+
+Analyse courante:
+{task_analysis}
+
+Cycle d'analyse:
+{memory.get("analysis_round", 0)}
 
 Derniere action:
 {_short(memory.get("last_action"))}
@@ -355,6 +470,9 @@ Etat actuel:
 
 Plan courant:
 {json.dumps(memory.get("plan", []), ensure_ascii=False, indent=2)}
+
+Analyse courante:
+{_short(memory.get("task_analysis"))}
 
 Derniere action:
 {_short(memory.get("last_action"))}
@@ -791,19 +909,45 @@ def run_agent_loop(
             memory["successful_tools_at_cycle_start"] = int(memory.get("successful_tools", 0))
             memory["cycles_without_progress"] = 0
             memory["blockage_reason"] = ""
-            _set_state(memory, STATE_PLAN, status="running")
+            _set_state(memory, STATE_ANALYZE, status="running")
             _emit_progress(
                 progress_callback,
                 "transition",
-                "Initializing run and moving to planning",
-                state=STATE_PLAN,
+                "Initializing run and moving to analysis",
+                state=STATE_ANALYZE,
             )
+            save_memory(memory)
+            continue
+
+        if state == STATE_ANALYZE:
+            analysis = _request_analysis(task, memory)
+            memory["task_analysis"] = analysis
+            memory["analysis_round"] = int(memory.get("analysis_round", 0)) + 1
+            memory["consecutive_failures"] = 0
+            memory.setdefault("progression", {})
+            memory["progression"]["analysis_round"] = memory["analysis_round"]
+            memory["progression"]["current_step"] = 0
+            memory["progression"]["task_analysis"] = analysis
+            _emit_progress(
+                progress_callback,
+                "analysis",
+                f"Analysis ready (round {memory['analysis_round']})",
+                state=STATE_ANALYZE,
+                analysis=analysis,
+            )
+            _set_state(memory, STATE_PLAN, status="running")
             save_memory(memory)
             continue
 
         if state == STATE_PLAN:
             try:
-                plan = plan_steps(task, get_context_summary(memory)) if use_planner else []
+                planner_context = get_context_summary(memory)
+                if memory.get("task_analysis"):
+                    planner_context = (
+                        f"{planner_context}\n\nAnalyse courante:\n"
+                        f"{json.dumps(memory['task_analysis'], ensure_ascii=False, indent=2)}"
+                    )
+                plan = plan_steps(task, planner_context) if use_planner else []
                 memory["plan"] = plan or []
                 memory["consecutive_failures"] = 0
                 _emit_progress(
@@ -831,39 +975,28 @@ def run_agent_loop(
 
         if state in {STATE_EXECUTE, STATE_FIX}:
             if _soft_limit_reached(memory):
-                if memory.get("continuous_run", True):
-                    logger.warning(
-                        "Soft limit of %s steps reached in cycle %s, replanning",
-                        MAX_STEPS,
-                        memory.get("cycle"),
+                logger.warning(
+                    "Soft limit of %s steps reached in cycle %s, reanalyzing",
+                    MAX_STEPS,
+                    memory.get("cycle"),
+                )
+                blocked = _reset_cycle(memory, f"Soft limit {MAX_STEPS} reached, reanalyzing")
+                _emit_progress(
+                    progress_callback,
+                    "cycle_restart",
+                    f"Cycle limit reached, restarting cycle {memory.get('cycle')}",
+                    state=STATE_ANALYZE,
+                    cycle=memory.get("cycle"),
+                    max_steps=MAX_STEPS,
+                )
+                if blocked:
+                    return _stop_for_total_blockage(
+                        memory,
+                        memory.get("blockage_reason", "Total blockage detected"),
+                        progress_callback=progress_callback,
                     )
-                    _emit_progress(
-                        progress_callback,
-                        "cycle_restart",
-                        f"Cycle limit reached, restarting cycle {memory.get('cycle') + 1}",
-                        state=state,
-                        cycle=memory.get("cycle"),
-                        max_steps=MAX_STEPS,
-                    )
-                    blocked = _reset_cycle(memory, f"Soft limit {MAX_STEPS} reached, replanning")
-                    if blocked:
-                        return _stop_for_total_blockage(
-                            memory,
-                            memory.get("blockage_reason", "Total blockage detected"),
-                            progress_callback=progress_callback,
-                        )
-                    save_memory(memory)
-                    continue
-
-                memory["status"] = "max_steps_reached"
-                memory["completed_at"] = _now_iso()
                 save_memory(memory)
-                return {
-                    "status": "max_steps_reached",
-                    "task": task,
-                    "steps": len(memory.get("steps", [])),
-                    "last_result": memory.get("last_result"),
-                }
+                continue
 
             memory["step_in_cycle"] = int(memory.get("step_in_cycle", 0)) + 1
             memory["total_steps"] = int(memory.get("total_steps", 0)) + 1
@@ -977,18 +1110,18 @@ def run_agent_loop(
                 memory["consecutive_failures"] = int(memory.get("consecutive_failures", 0)) + 1
                 if memory["consecutive_failures"] > MAX_RETRIES:
                     logger.warning(
-                        "Too many consecutive strategy failures (%s), replanning",
+                        "Too many consecutive strategy failures (%s), reanalyzing",
                         memory["consecutive_failures"],
                     )
                     memory["consecutive_failures"] = 0
                     _emit_progress(
                         progress_callback,
                         "cycle_restart",
-                        "Too many strategy failures, replanning automatically",
-                        state=STATE_PLAN,
+                        "Too many strategy failures, reanalyzing automatically",
+                        state=STATE_ANALYZE,
                         result=result,
                     )
-                    _set_state(memory, STATE_PLAN, status="running")
+                    _set_state(memory, STATE_ANALYZE, status="running")
                 else:
                     _emit_progress(
                         progress_callback,
@@ -1047,18 +1180,18 @@ def run_agent_loop(
                 memory["consecutive_failures"] = int(memory.get("consecutive_failures", 0)) + 1
                 if memory["consecutive_failures"] > MAX_RETRIES:
                     logger.warning(
-                        "Too many consecutive failures (%s), forcing replan",
+                        "Too many consecutive failures (%s), forcing reanalysis",
                         memory["consecutive_failures"],
                     )
                     memory["consecutive_failures"] = 0
                     _emit_progress(
                         progress_callback,
                         "cycle_restart",
-                        "Too many verification failures, replanning automatically",
-                        state=STATE_PLAN,
+                        "Too many verification failures, reanalyzing automatically",
+                        state=STATE_ANALYZE,
                         verification=verification,
                     )
-                    _set_state(memory, STATE_PLAN, status="running")
+                    _set_state(memory, STATE_ANALYZE, status="running")
                 else:
                     _emit_progress(
                         progress_callback,
@@ -1073,23 +1206,21 @@ def run_agent_loop(
 
             memory["pending_final"] = None
             memory["consecutive_failures"] = 0
-            if memory.get("continuous_run", True):
-                _emit_progress(
-                    progress_callback,
-                    "cycle_restart",
-                    "Task not complete yet, relaunching a new cycle automatically",
-                    state=STATE_PLAN,
-                    verification=verification,
+            blocked = _reset_cycle(memory, verification["reason"] or "Task not completed yet")
+            _emit_progress(
+                progress_callback,
+                "cycle_restart",
+                "Task not complete yet, relaunching a new cycle automatically",
+                state=STATE_ANALYZE,
+                verification=verification,
+                cycle=memory.get("cycle"),
+            )
+            if blocked:
+                return _stop_for_total_blockage(
+                    memory,
+                    memory.get("blockage_reason", "Total blockage detected"),
+                    progress_callback=progress_callback,
                 )
-                blocked = _reset_cycle(memory, verification["reason"] or "Task not completed yet")
-                if blocked:
-                    return _stop_for_total_blockage(
-                        memory,
-                        memory.get("blockage_reason", "Total blockage detected"),
-                        progress_callback=progress_callback,
-                    )
-            else:
-                _set_state(memory, STATE_PLAN, status="running")
             save_memory(memory)
             continue
 
@@ -1105,20 +1236,21 @@ def run_agent_loop(
             )
             return memory.get("final_result", "")
 
-        logger.warning("Unknown state '%s', reinitializing planner", state)
+        logger.warning("Unknown state '%s', reinitializing analysis", state)
         _emit_progress(
             progress_callback,
             "transition",
-            f"Unknown state `{state}`, returning to planning",
-            state=STATE_PLAN,
+            f"Unknown state `{state}`, returning to analysis",
+            state=STATE_ANALYZE,
         )
-        _set_state(memory, STATE_PLAN, status="running")
+        _set_state(memory, STATE_ANALYZE, status="running")
         save_memory(memory)
 
 
 __all__ = [
     "MAX_STEPS",
     "STATE_COMPLETE",
+    "STATE_ANALYZE",
     "STATE_EXECUTE",
     "STATE_FIX",
     "STATE_INIT",
