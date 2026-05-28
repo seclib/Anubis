@@ -50,6 +50,7 @@ from agent.reviewer_agent import (
     create_reviewer_state,
     normalize_review_report,
 )
+from agent.self_improvement import optimize_prompt_guidance, update_self_improvement_memory
 from agent.streaming import short_text
 from agent.tester_agent import (
     build_tester_context,
@@ -287,6 +288,11 @@ def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
         "last_tool_analysis": None,
         "last_repo_analysis": None,
         "last_git_commit": None,
+        "self_improvement": {
+            "performance": {},
+            "strategy_improvements": [],
+            "prompt_guidance": "",
+        },
         "self_healing": {
             "max_tool_retries": MAX_SELF_HEALING_RETRIES,
             "persistent_failures": 0,
@@ -489,6 +495,42 @@ def _vector_context_text(query: str) -> str:
     except Exception as exc:
         logger.debug("Vector context retrieval failed: %s", exc)
         return "Vector context unavailable."
+
+
+def _self_improvement_text(memory: dict[str, Any]) -> str:
+    try:
+        state = update_self_improvement_memory(memory)
+        return str(state.get("prompt_guidance") or optimize_prompt_guidance(memory))
+    except Exception as exc:
+        logger.debug("Self-improvement guidance unavailable: %s", exc)
+        return "Continuous improvement guidance unavailable."
+
+
+def _refresh_self_improvement(
+    memory: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, Any]:
+    try:
+        state = update_self_improvement_memory(memory)
+    except Exception as exc:
+        logger.debug("Self-improvement refresh failed: %s", exc)
+        state = {
+            "performance": {},
+            "strategy_improvements": [],
+            "prompt_guidance": "Continuous improvement guidance unavailable.",
+        }
+        memory["self_improvement"] = state
+
+    _emit_progress(
+        progress_callback,
+        "self_improvement",
+        "Continuous improvement analysis refreshed",
+        state=memory.get("state"),
+        cycle=memory.get("cycle"),
+        step=memory.get("total_steps"),
+        self_improvement=state,
+    )
+    return state
 
 
 def _record_agent_message(
@@ -804,6 +846,9 @@ Contexte orchestrateur:
 Contexte vectoriel pertinent:
 {vector_context}
 
+Amelioration continue:
+{_self_improvement_text(memory)}
+
 Contexte repository initial:
 {_repo_context_text(memory)}
 
@@ -914,6 +959,9 @@ Contexte collaboration multi-agent:
 Contexte coder_agent:
 {build_coder_context(memory)}
 
+Amelioration continue:
+{_self_improvement_text(memory)}
+
 Analyse courante:
 {task_analysis}
 
@@ -1000,6 +1048,9 @@ Dernier resultat:
 
 Contexte recent:
 {get_context_summary(memory)}
+
+Amelioration continue:
+{_self_improvement_text(memory)}
 
 Contexte vectoriel pertinent:
 {vector_context}
@@ -1142,6 +1193,9 @@ Historique des echecs de ce tool:
 
 Contexte recent:
 {get_context_summary(memory)}
+
+Amelioration continue:
+{_self_improvement_text(memory)}
 
 Contexte vectoriel pertinent:
 {vector_context}
@@ -1658,6 +1712,7 @@ def run_agent_loop(
             continue
 
         if state == STATE_ANALYZE:
+            _refresh_self_improvement(memory, progress_callback=progress_callback)
             analysis = _request_analysis(task, memory)
             memory["task_analysis"] = analysis
             memory["analysis_round"] = int(memory.get("analysis_round", 0)) + 1

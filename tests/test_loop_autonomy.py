@@ -13,6 +13,12 @@ from agent.communication import (
     dequeue_agent_messages,
     enqueue_agent_message,
 )
+from agent.self_improvement import (
+    analyze_performance,
+    optimize_prompt_guidance,
+    propose_strategy_improvements,
+    update_self_improvement_memory,
+)
 from executor import tool_executor
 from tools import git_autonomy
 from tools import dynamic_tools
@@ -317,6 +323,73 @@ class AutonomousLoopTest(unittest.TestCase):
 
         self.assertFalse(result["success"])
         self.assertIn("create_dynamic_tool", result["output"])
+
+    def test_self_improvement_detects_recurring_failures_and_guides_strategy(self):
+        memory = loop._initial_memory("Improve itself", use_planner=True)
+        repeated_error = {
+            "type": "FileNotFoundError",
+            "error": "missing README",
+        }
+        for step in range(1, 4):
+            memory["tool_results"].append(
+                {
+                    "step": step,
+                    "tool": "read_file",
+                    "success": False,
+                    "output": repeated_error,
+                }
+            )
+            memory["errors"].append(
+                {
+                    "step": step,
+                    "tool": "read_file",
+                    "error": repeated_error,
+                }
+            )
+
+        analysis = analyze_performance(memory)
+        suggestions = propose_strategy_improvements(memory)
+        guidance = optimize_prompt_guidance(memory)
+        state = update_self_improvement_memory(memory)
+
+        self.assertEqual(analysis["success_rate"], 0.0)
+        self.assertTrue(analysis["recurring_failures"])
+        self.assertTrue(any("find_file" in suggestion for suggestion in suggestions))
+        self.assertIn("Continuous improvement guidance", guidance)
+        self.assertEqual(memory["self_improvement"], state)
+
+    def test_self_improvement_guidance_is_in_agent_prompts(self):
+        memory = loop._initial_memory("Use better strategy", use_planner=True)
+        memory["tool_results"] = [
+            {"tool": "run_command", "success": False, "output": {"type": "TimeoutExpired"}},
+            {"tool": "run_command", "success": False, "output": {"type": "TimeoutExpired"}},
+            {"tool": "read_file", "success": True, "output": "ok"},
+        ]
+        memory["errors"] = [
+            {"tool": "run_command", "error": {"type": "TimeoutExpired"}},
+            {"tool": "run_command", "error": {"type": "TimeoutExpired"}},
+        ]
+        memory["last_result"] = {"success": False, "output": "timeout"}
+
+        with patch.object(loop, "_vector_context_text", return_value="vector context"):
+            prompts = [
+                loop._build_analysis_prompt("Use better strategy", memory),
+                loop._build_action_prompt("Use better strategy", memory),
+                loop._build_evaluate_success_prompt("Use better strategy", memory, memory["last_result"]),
+                loop._build_correction_prompt(
+                    task="Use better strategy",
+                    memory=memory,
+                    tool="run_command",
+                    args={"cmd": "slow command"},
+                    error_text="timeout",
+                    retry_number=1,
+                    failure_history=[],
+                ),
+            ]
+
+        for prompt in prompts:
+            self.assertIn("Amelioration continue", prompt)
+            self.assertIn("Most failed tools", prompt)
 
     def test_coder_agent_contract_uses_recommended_model_and_minimal_rules(self):
         memory = loop._initial_memory("Implement feature", use_planner=True)

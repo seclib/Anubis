@@ -88,6 +88,8 @@ def live_execution_snapshot(event: dict[str, Any]) -> dict[str, Any]:
         live["tool_args"] = event["args"]
     if event.get("messages") is not None:
         live["messages"] = event["messages"]
+    if event.get("self_improvement") is not None:
+        live["self_improvement"] = event["self_improvement"]
 
     logs = _shell_logs(event)
     if logs:
@@ -204,6 +206,7 @@ def format_live_execution_event(event: dict[str, Any]) -> str:
         "complete": "🏁",
         "blocked": "⛔",
         "state": "📍",
+        "self_improvement": "🧬",
     }
     icon = icon_by_type.get(event_type, "•")
 
@@ -221,6 +224,11 @@ def format_live_execution_event(event: dict[str, Any]) -> str:
     if live.get("messages"):
         text += "- Inter-agent messages:\n" + _markdown_code_block(
             json.dumps(live["messages"], ensure_ascii=False, indent=2, default=str),
+            "json",
+        )
+    if live.get("self_improvement"):
+        text += "- Self-improvement:\n" + _markdown_code_block(
+            json.dumps(live["self_improvement"], ensure_ascii=False, indent=2, default=str),
             "json",
         )
     if live.get("tool"):

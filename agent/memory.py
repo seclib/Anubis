@@ -48,6 +48,11 @@ def _default_memory() -> dict[str, Any]:
         "last_review_report": None,
         "last_git_commit": None,
         "collaboration_summary": "",
+        "self_improvement": {
+            "performance": {},
+            "strategy_improvements": [],
+            "prompt_guidance": "",
+        },
         "final_result": None,
     }
 
@@ -73,6 +78,17 @@ def _normalize_memory(memory: Any) -> dict[str, Any]:
     if not isinstance(communication.get("stats"), dict):
         communication["stats"] = {"sent": 0, "delivered": 0, "pending": 0}
     communication["stats"]["pending"] = len(communication["queue"])
+
+    self_improvement = normalized.get("self_improvement")
+    if not isinstance(self_improvement, dict):
+        self_improvement = _default_memory()["self_improvement"]
+        normalized["self_improvement"] = self_improvement
+    if not isinstance(self_improvement.get("performance"), dict):
+        self_improvement["performance"] = {}
+    if not isinstance(self_improvement.get("strategy_improvements"), list):
+        self_improvement["strategy_improvements"] = []
+    if not isinstance(self_improvement.get("prompt_guidance"), str):
+        self_improvement["prompt_guidance"] = ""
 
     default_progression = _default_memory()["progression"]
     progression = normalized.get("progression")
