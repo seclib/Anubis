@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent.coder_agent import CODER_PROMPT
+from agent.communication import communication_context
 from agent.debugger_agent import DEBUGGER_PROMPT
 from agent.reviewer_agent import REVIEWER_PROMPT
 from agent.tester_agent import TESTER_PROMPT
@@ -175,7 +176,10 @@ def append_agent_message(
 def collaboration_context(memory: dict[str, Any], limit: int = 8) -> str:
     messages = memory.get("agent_messages", [])
     if not isinstance(messages, list) or not messages:
-        return "No prior multi-agent messages."
+        return (
+            "No prior multi-agent messages."
+            f"\n\nInter-agent communication bus:\n{communication_context(memory, limit=limit)}"
+        )
 
     lines: list[str] = []
     for message in messages[-limit:]:
@@ -186,7 +190,8 @@ def collaboration_context(memory: dict[str, Any], limit: int = 8) -> str:
         text = str(message.get("message", ""))[:600]
         lines.append(f"- {agent_name} [{phase}]: {text}")
 
-    return "\n".join(lines) if lines else "No prior multi-agent messages."
+    transcript = "\n".join(lines) if lines else "No prior multi-agent messages."
+    return f"{transcript}\n\nInter-agent communication bus:\n{communication_context(memory, limit=limit)}"
 
 
 __all__ = [

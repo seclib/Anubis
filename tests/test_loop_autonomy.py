@@ -7,6 +7,12 @@ from unittest.mock import patch
 
 from agent import loop
 from agent import vector_memory
+from agent.communication import (
+    communication_context,
+    communication_snapshot,
+    dequeue_agent_messages,
+    enqueue_agent_message,
+)
 from tools import git_autonomy
 from tools.sandbox import SandboxViolation, audit_tool_action, validate_command
 from tools.terminal import run_command
@@ -190,6 +196,64 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertEqual(assignment["to"], loop.CODER_AGENT)
         self.assertEqual(memory["orchestration"]["current_assignment"], assignment)
         self.assertIn("coder_agent [action] success=True", aggregate_results(memory))
+        self.assertEqual(memory["agent_communication"]["queue"][0]["recipient"], loop.CODER_AGENT)
+        self.assertEqual(memory["agent_communication"]["queue"][0]["type"], "task")
+
+    def test_inter_agent_queue_orders_delivers_and_records_history(self):
+        memory = loop._initial_memory("Coordinate agents", use_planner=True)
+
+        low = enqueue_agent_message(
+            memory,
+            sender=loop.PLANNER_AGENT,
+            recipient=loop.CODER_AGENT,
+            message_type="context",
+            payload={"note": "architecture context"},
+            priority=10,
+        )
+        high = enqueue_agent_message(
+            memory,
+            sender=loop.ORCHESTRATOR_AGENT,
+            recipient=loop.CODER_AGENT,
+            message_type="task",
+            payload={"task": "implement feature"},
+            priority=90,
+        )
+
+        self.assertEqual(memory["agent_communication"]["queue"][0]["id"], high["id"])
+        self.assertEqual(memory["agent_communication"]["queue"][1]["id"], low["id"])
+
+        delivered = dequeue_agent_messages(memory, recipient=loop.CODER_AGENT, limit=1)
+        snapshot = communication_snapshot(memory)
+
+        self.assertEqual(delivered[0]["id"], high["id"])
+        self.assertEqual(delivered[0]["status"], "delivered")
+        self.assertEqual(snapshot["stats"]["sent"], 2)
+        self.assertEqual(snapshot["stats"]["delivered"], 1)
+        self.assertEqual(snapshot["stats"]["pending"], 1)
+        self.assertIn("orchestrator_agent -> coder_agent [task/delivered]", communication_context(memory))
+
+    def test_call_agent_delivers_assignment_and_shares_result(self):
+        memory = loop._initial_memory("Coordinate one call", use_planner=True)
+        events = []
+
+        with (
+            patch.object(loop, "call_agent", return_value="implemented result"),
+            patch.object(loop, "index_agent_history", return_value={"status": "indexed"}),
+        ):
+            output = loop._call_agent(
+                loop.CODER_AGENT,
+                "Implement next step",
+                memory,
+                phase="action",
+                progress_callback=events.append,
+            )
+
+        self.assertEqual(output, "implemented result")
+        history = memory["agent_communication"]["history"]
+        self.assertTrue(any(message["type"] == "task" for message in history))
+        self.assertTrue(any(message["type"] == "result" for message in history))
+        self.assertTrue(any(message["type"] == "context" for message in history))
+        self.assertTrue(any(event["type"] == "agent_messages_delivered" for event in events))
 
     def test_coder_agent_contract_uses_recommended_model_and_minimal_rules(self):
         memory = loop._initial_memory("Implement feature", use_planner=True)

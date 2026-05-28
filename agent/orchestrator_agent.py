@@ -13,6 +13,7 @@ from agent.multi_agent import (
     REVIEWER_AGENT,
     TESTER_AGENT,
 )
+from agent.communication import send_agent_task
 
 
 ORCHESTRATOR_RESPONSIBILITIES = [
@@ -92,6 +93,19 @@ def record_assignment(
     }
     orchestration.setdefault("assignments", []).append(assignment)
     orchestration["current_assignment"] = assignment
+    task_message = send_agent_task(
+        memory,
+        sender=ORCHESTRATOR_AGENT,
+        recipient=target_agent,
+        task=reason,
+        phase=phase,
+        priority=priority_for_phase(phase),
+        context={
+            "assignment": assignment,
+            "user_task": memory.get("task"),
+        },
+    )
+    assignment["message_id"] = task_message["id"]
     return assignment
 
 

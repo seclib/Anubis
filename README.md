@@ -76,6 +76,12 @@ Each agent has:
 - a dedicated Ollama model configured by environment variable
 
 The agents collaborate through shared runtime memory (`agent_messages` and `collaboration_summary`) and emit live events during streaming.
+They also communicate through an internal structured bus:
+- FIFO priority queue for agent-to-agent tasks, results, context, coordination, status, and errors
+- per-agent inbox delivery before each specialized agent call
+- communication history persisted in runtime memory
+- orchestrator assignments automatically become queued tasks
+- agent results and context are shared back to the orchestrator and team
 
 ### 5. **Task Validation**
 Before completion, the agent validates:
@@ -91,6 +97,7 @@ Before completion, the agent validates:
 - Action replay log
 - Compact state summaries for LLM
 - Multi-agent collaboration transcript and summary
+- Inter-agent communication queue, inboxes, and history
 
 ### 7. **Local Vector Memory / Repository RAG**
 - Indexes repository files into a local vector store

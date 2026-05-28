@@ -25,6 +25,16 @@ def _default_memory() -> dict[str, Any]:
         "task": None,
         "steps": [],
         "orchestration": {},
+        "agent_communication": {
+            "queue": [],
+            "history": [],
+            "inbox": {},
+            "stats": {
+                "sent": 0,
+                "delivered": 0,
+                "pending": 0,
+            },
+        },
         "coder_agent": {},
         "debugger_agent": {},
         "reviewer_agent": {},
@@ -50,6 +60,19 @@ def _normalize_memory(memory: Any) -> dict[str, Any]:
     for key in ("tasks", "actions", "tool_results", "errors", "steps", "agent_messages"):
         if not isinstance(normalized.get(key), list):
             normalized[key] = []
+
+    communication = normalized.get("agent_communication")
+    if not isinstance(communication, dict):
+        communication = _default_memory()["agent_communication"]
+        normalized["agent_communication"] = communication
+    for key in ("queue", "history"):
+        if not isinstance(communication.get(key), list):
+            communication[key] = []
+    if not isinstance(communication.get("inbox"), dict):
+        communication["inbox"] = {}
+    if not isinstance(communication.get("stats"), dict):
+        communication["stats"] = {"sent": 0, "delivered": 0, "pending": 0}
+    communication["stats"]["pending"] = len(communication["queue"])
 
     default_progression = _default_memory()["progression"]
     progression = normalized.get("progression")

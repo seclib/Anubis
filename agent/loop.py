@@ -8,6 +8,12 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from agent.coder_agent import build_coder_context, create_coder_state
+from agent.communication import (
+    broadcast_agent_context,
+    communication_context,
+    dequeue_agent_messages,
+    share_agent_result,
+)
 from agent.debugger_agent import (
     build_debugger_context,
     create_debugger_state,
@@ -240,6 +246,16 @@ def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
         "repo_context": None,
         "agents": agent_roster(),
         "orchestration": create_orchestrator_state(task),
+        "agent_communication": {
+            "queue": [],
+            "history": [],
+            "inbox": {},
+            "stats": {
+                "sent": 0,
+                "delivered": 0,
+                "pending": 0,
+            },
+        },
         "coder_agent": create_coder_state(),
         "debugger_agent": create_debugger_state(),
         "reviewer_agent": create_reviewer_state(),
@@ -449,6 +465,7 @@ def _collaboration_text(memory: dict[str, Any]) -> str:
         "orchestrator": build_orchestrator_context(memory),
         "collaboration_summary": memory.get("collaboration_summary", ""),
         "recent_agent_messages": collaboration_context(memory),
+        "communication_bus": communication_context(memory),
     }
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
@@ -535,6 +552,19 @@ def _call_agent(
         cycle=memory.get("cycle"),
         step=memory.get("total_steps"),
     )
+    inbound_messages = dequeue_agent_messages(memory, recipient=agent_name)
+    if inbound_messages:
+        _emit_progress(
+            progress_callback,
+            "agent_messages_delivered",
+            f"{agent_name} received {len(inbound_messages)} inter-agent message(s)",
+            agent=agent_name,
+            phase=phase,
+            messages=inbound_messages,
+            state=memory.get("state"),
+            cycle=memory.get("cycle"),
+            step=memory.get("total_steps"),
+        )
     output = call_agent(agent_name, task_prompt, collaboration_context(memory))
     record_result(
         memory,
@@ -542,6 +572,24 @@ def _call_agent(
         phase=phase,
         result=_short(output),
         success=not str(output).startswith("[LLM ERROR]"),
+    )
+    result_message = share_agent_result(
+        memory,
+        sender=agent_name,
+        recipient=ORCHESTRATOR_AGENT,
+        phase=phase,
+        result=_short(output),
+        success=not str(output).startswith("[LLM ERROR]"),
+    )
+    broadcast_agent_context(
+        memory,
+        sender=agent_name,
+        context={
+            "phase": phase,
+            "summary": _short(output),
+            "source_message_id": result_message["id"],
+        },
+        priority=40,
     )
     _record_agent_message(
         memory,

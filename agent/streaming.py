@@ -86,6 +86,8 @@ def live_execution_snapshot(event: dict[str, Any]) -> dict[str, Any]:
 
     if event.get("args") is not None:
         live["tool_args"] = event["args"]
+    if event.get("messages") is not None:
+        live["messages"] = event["messages"]
 
     logs = _shell_logs(event)
     if logs:
@@ -188,6 +190,7 @@ def format_live_execution_event(event: dict[str, Any]) -> str:
 
     icon_by_type = {
         "agent_start": "🧠",
+        "agent_messages_delivered": "📨",
         "orchestrator_assignment": "🎯",
         "plan": "🗺️",
         "action": "⚙️",
@@ -215,6 +218,11 @@ def format_live_execution_event(event: dict[str, Any]) -> str:
 
     if live.get("target_agent"):
         text += f"- Delegated to: `{live['target_agent']}`\n"
+    if live.get("messages"):
+        text += "- Inter-agent messages:\n" + _markdown_code_block(
+            json.dumps(live["messages"], ensure_ascii=False, indent=2, default=str),
+            "json",
+        )
     if live.get("tool"):
         attempt = ""
         if live.get("attempt"):
