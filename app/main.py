@@ -27,7 +27,7 @@ if str(PROJECT_SOURCE) not in sys.path:
 from agent.loop import run_agent_loop
 from agent.streaming import (
     agent_event_payload,
-    format_progress_event,
+    format_live_execution_event,
     format_sse_event,
     short_text,
 )
@@ -288,7 +288,7 @@ async def _stream_chat_completion(
 
                     kind = item.get("kind")
                     if kind == "progress":
-                        text = format_progress_event(item["event"])
+                        text = format_live_execution_event(item["event"])
                         yield _chat_completion_chunk(
                             model,
                             text,

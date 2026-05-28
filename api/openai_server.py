@@ -15,7 +15,7 @@ from urllib.parse import urlparse
 from agent.loop import run_agent_loop
 from agent.streaming import (
     agent_event_payload,
-    format_progress_event,
+    format_live_execution_event,
     format_sse_event,
     short_text,
 )
@@ -232,7 +232,7 @@ class OpenAICompatibleHandler(BaseHTTPRequestHandler):
 
                 kind = item.get("kind")
                 if kind == "progress":
-                    text = format_progress_event(item["event"])
+                    text = format_live_execution_event(item["event"])
                     emit_chunk(text, include_role=not emitted_role)
                     emitted_role = True
                     if item["event"].get("type") == "complete":

@@ -256,12 +256,16 @@ Implemented endpoints:
 
 Streaming is supported on `POST /v1/chat/completions` with `stream=true`.
 Open WebUI can therefore display live agent progress, including:
-- state transitions
-- tool execution logs
+- active agent and delegated phase
+- planning steps
+- tool execution start/result/error
+- shell stdout/stderr, exit code, timeout, and truncation status
 - retry / auto-correction events
 - intermediate verification results
 
-For a Cursor / Claude Code style UI, use the native structured stream:
+This makes Open WebUI behave like a Cursor / Claude Code style live execution interface when the selected model is used with streaming enabled.
+
+For custom UIs, use the native structured stream:
 
 ```bash
 curl -N http://localhost:8000/v1/agent/stream \
@@ -270,10 +274,22 @@ curl -N http://localhost:8000/v1/agent/stream \
 ```
 
 This endpoint returns Server-Sent Events:
-- `agent_progress`: state, selected action, tool start/result/error, intermediate result, verification
+- `agent_progress`: state, active agent, selected action, plan, tool start/result/error, shell logs, auto-corrections, verification
 - `agent_result`: final agent result
 - `agent_error`: execution error
 - `agent_done`: stream closed cleanly
+
+Each `agent_progress` event includes a `live` object optimized for live execution UIs:
+
+```json
+{
+  "active_agent": "tester_agent",
+  "phase": "validation",
+  "tool": "run_command",
+  "shell": {"stdout": "...", "stderr": "...", "code": 0},
+  "progress": {"state": "EXECUTE", "cycle": 1, "step": 2}
+}
+```
 
 RAG tools available to agents:
 - `index_repository`: refresh the local vector index

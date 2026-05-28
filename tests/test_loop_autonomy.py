@@ -41,7 +41,12 @@ from agent.reviewer_agent import (
     build_reviewer_context,
     normalize_review_report,
 )
-from agent.streaming import agent_event_payload, format_progress_event, format_sse_event
+from agent.streaming import (
+    agent_event_payload,
+    format_live_execution_event,
+    format_progress_event,
+    format_sse_event,
+)
 from agent.tester_agent import (
     TESTER_PROMPT,
     TESTER_REPORT_SCHEMA,
@@ -781,6 +786,66 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertIn("tool=read_file", text)
         self.assertIn("event: agent_progress", sse)
         self.assertIn('"sequence": 7', sse)
+        self.assertEqual(payload["live"]["tool"], "read_file")
+        self.assertEqual(payload["live"]["progress"]["state"], loop.STATE_EXECUTE)
+
+    def test_live_execution_event_renders_shell_logs_and_agent(self):
+        event = {
+            "type": "tool_result",
+            "message": "Tool `run_command` succeeded",
+            "state": loop.STATE_EXECUTE,
+            "agent": loop.TESTER_AGENT,
+            "phase": "validation",
+            "tool": "run_command",
+            "attempt": 1,
+            "result": {
+                "success": True,
+                "output": {
+                    "stdout": "tests passed",
+                    "stderr": "",
+                    "code": 0,
+                    "timeout": False,
+                },
+            },
+        }
+
+        payload = agent_event_payload(event, sequence=8)
+        text = format_live_execution_event(event)
+
+        self.assertEqual(payload["live"]["active_agent"], loop.TESTER_AGENT)
+        self.assertEqual(payload["live"]["shell"]["stdout"], "tests passed")
+        self.assertIn("agent: `tester_agent`", text)
+        self.assertIn("Tool: `run_command`", text)
+        self.assertIn("**Shell Logs**", text)
+        self.assertIn("tests passed", text)
+
+    def test_live_execution_event_renders_plan_and_correction(self):
+        plan_event = {
+            "type": "plan",
+            "message": "Plan ready with 1 step(s)",
+            "state": loop.STATE_PLAN,
+            "plan": [{"step": 1, "goal": "Run tests", "tool_hint": "run_command"}],
+        }
+        correction_event = {
+            "type": "tool_correction",
+            "message": "Auto-correction for `read_file`: use README",
+            "state": loop.STATE_FIX,
+            "tool": "read_file",
+            "analysis": "Path was missing",
+            "reason": "README exists",
+            "retry": True,
+            "corrected_args": {"path": "README.md"},
+        }
+
+        plan_text = format_live_execution_event(plan_event)
+        correction_text = format_live_execution_event(correction_event)
+        correction_payload = agent_event_payload(correction_event, sequence=9)
+
+        self.assertIn("**Planning Steps**", plan_text)
+        self.assertIn("Run tests", plan_text)
+        self.assertIn("**Automatic Correction**", correction_text)
+        self.assertIn("README.md", correction_text)
+        self.assertEqual(correction_payload["live"]["correction"]["corrected_args"], {"path": "README.md"})
 
 
 if __name__ == "__main__":
