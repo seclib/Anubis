@@ -1,11 +1,12 @@
 
-import requests
 from typing import Optional
 
-from config import OLLAMA_BASE_URL
+import requests
+
+from config import OLLAMA_BASE_URL, OLLAMA_MODEL
 
 OLLAMA_URL = f"{OLLAMA_BASE_URL.rstrip('/')}/api/generate"
-DEFAULT_MODEL = "qwen2.5-coder"
+DEFAULT_MODEL = OLLAMA_MODEL
 FALLBACK_MODEL = "llama3"
 MAX_RETRIES = 2
 TIMEOUT = 15

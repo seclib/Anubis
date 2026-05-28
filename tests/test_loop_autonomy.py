@@ -8,6 +8,18 @@ from agent.streaming import agent_event_payload, format_progress_event, format_s
 
 
 class AutonomousLoopTest(unittest.TestCase):
+    def _fake_call_agent(self, fake_llm):
+        def call_agent(agent_name: str, prompt: str, collaboration_context: str = "") -> str:
+            if agent_name == loop.PLANNER_AGENT:
+                return json.dumps([{"step": 1, "goal": "Plan", "tool_hint": "read_file"}])
+            if agent_name == loop.MEMORY_AGENT:
+                return "collaboration summary"
+            if agent_name == loop.TESTER_AGENT:
+                return json.dumps({"success": False, "reason": "tester evidence recorded"})
+            return fake_llm(prompt)
+
+        return call_agent
+
     def test_global_autonomy_contract_is_in_all_llm_prompts(self):
         memory = loop._initial_memory("Fix the project", use_planner=True)
         memory["last_result"] = {"success": False, "output": "boom"}
@@ -32,6 +44,26 @@ class AutonomousLoopTest(unittest.TestCase):
             self.assertIn(AUTONOMY_RULES, prompt)
             self.assertIn("Never ask for human help", prompt)
             self.assertIn("You are responsible for the final success", prompt)
+
+    def test_multi_agent_roster_contains_dedicated_roles_and_models(self):
+        memory = loop._initial_memory("Build multi-agent system", use_planner=True)
+        roster = {agent["name"]: agent for agent in memory["agents"]}
+
+        expected_agents = {
+            loop.ORCHESTRATOR_AGENT,
+            loop.PLANNER_AGENT,
+            loop.CODER_AGENT,
+            loop.REVIEWER_AGENT,
+            loop.TESTER_AGENT,
+            loop.DEBUGGER_AGENT,
+            loop.MEMORY_AGENT,
+        }
+
+        self.assertEqual(set(roster), expected_agents)
+        for agent in roster.values():
+            self.assertTrue(agent["role"])
+            self.assertTrue(agent["model"])
+            self.assertTrue(agent["prompt"])
 
     def test_loop_reanalyzes_until_completion_without_human_stop(self):
         events = []
@@ -103,7 +135,7 @@ class AutonomousLoopTest(unittest.TestCase):
             return soft_limit_count == 1
 
         with (
-            patch.object(loop, "call_llm", side_effect=fake_llm),
+            patch.object(loop, "call_agent", side_effect=self._fake_call_agent(fake_llm)),
             patch.object(loop, "load_memory", return_value={}),
             patch.object(loop, "save_memory", lambda memory: None),
             patch.object(loop, "append_event", lambda memory, event: None),
@@ -218,7 +250,7 @@ class AutonomousLoopTest(unittest.TestCase):
             return {"success": True, "output": [f"{tool}:ok"]}
 
         with (
-            patch.object(loop, "call_llm", side_effect=fake_llm),
+            patch.object(loop, "call_agent", side_effect=self._fake_call_agent(fake_llm)),
             patch.object(loop, "load_memory", return_value={}),
             patch.object(loop, "save_memory", lambda memory: None),
             patch.object(loop, "append_event", lambda memory, event: None),
@@ -296,7 +328,7 @@ class AutonomousLoopTest(unittest.TestCase):
             raise AssertionError(f"Unexpected prompt: {prompt[:200]}")
 
         with (
-            patch.object(loop, "call_llm", side_effect=fake_llm),
+            patch.object(loop, "call_agent", side_effect=self._fake_call_agent(fake_llm)),
             patch.object(loop, "load_memory", return_value={}),
             patch.object(loop, "save_memory", lambda memory: None),
             patch.object(loop, "append_event", lambda memory, event: None),

@@ -1,0 +1,199 @@
+"""Multi-agent collaboration primitives for Anubis."""
+
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Any
+
+from config import (
+    CODER_AGENT_MODEL,
+    DEBUGGER_AGENT_MODEL,
+    MEMORY_AGENT_MODEL,
+    ORCHESTRATOR_AGENT_MODEL,
+    PLANNER_AGENT_MODEL,
+    REVIEWER_AGENT_MODEL,
+    TESTER_AGENT_MODEL,
+)
+from llm.ollama import call_llm
+
+
+ORCHESTRATOR_AGENT = "orchestrator_agent"
+PLANNER_AGENT = "planner_agent"
+CODER_AGENT = "coder_agent"
+REVIEWER_AGENT = "reviewer_agent"
+TESTER_AGENT = "tester_agent"
+DEBUGGER_AGENT = "debugger_agent"
+MEMORY_AGENT = "memory_agent"
+
+
+@dataclass(frozen=True)
+class AgentSpec:
+    name: str
+    role: str
+    model: str
+    prompt: str
+
+
+AGENT_SPECS: dict[str, AgentSpec] = {
+    ORCHESTRATOR_AGENT: AgentSpec(
+        name=ORCHESTRATOR_AGENT,
+        role="Coordinate autonomous work, choose the next responsible agent, and keep the task moving.",
+        model=ORCHESTRATOR_AGENT_MODEL,
+        prompt=(
+            "You are the orchestrator_agent. Coordinate the multi-agent team, keep global autonomy, "
+            "choose decisive next actions, and never ask humans for help."
+        ),
+    ),
+    PLANNER_AGENT: AgentSpec(
+        name=PLANNER_AGENT,
+        role="Decompose the user task into concrete implementation and verification steps.",
+        model=PLANNER_AGENT_MODEL,
+        prompt=(
+            "You are the planner_agent. Produce concise, executable plans grounded in repository context. "
+            "Prefer small steps with clear success criteria."
+        ),
+    ),
+    CODER_AGENT: AgentSpec(
+        name=CODER_AGENT,
+        role="Select coding tools and implement changes safely inside the workspace.",
+        model=CODER_AGENT_MODEL,
+        prompt=(
+            "You are the coder_agent. Choose tool calls for reading, editing, searching, and running commands. "
+            "Be precise, minimal, and implementation-focused."
+        ),
+    ),
+    REVIEWER_AGENT: AgentSpec(
+        name=REVIEWER_AGENT,
+        role="Review intermediate results for correctness, regressions, and completion readiness.",
+        model=REVIEWER_AGENT_MODEL,
+        prompt=(
+            "You are the reviewer_agent. Evaluate whether the work satisfies the task. "
+            "Look for missed requirements, unsafe changes, and incomplete outcomes."
+        ),
+    ),
+    TESTER_AGENT: AgentSpec(
+        name=TESTER_AGENT,
+        role="Decide and interpret verification steps, tests, builds, and command results.",
+        model=TESTER_AGENT_MODEL,
+        prompt=(
+            "You are the tester_agent. Validate behavior through available evidence and recommend concrete "
+            "verification actions when needed."
+        ),
+    ),
+    DEBUGGER_AGENT: AgentSpec(
+        name=DEBUGGER_AGENT,
+        role="Diagnose failures and produce corrected tool arguments or alternate strategies.",
+        model=DEBUGGER_AGENT_MODEL,
+        prompt=(
+            "You are the debugger_agent. Analyze failed tool calls, identify root causes, and generate "
+            "corrected arguments without asking for human intervention."
+        ),
+    ),
+    MEMORY_AGENT: AgentSpec(
+        name=MEMORY_AGENT,
+        role="Maintain shared memory, summarize collaboration, and preserve useful context.",
+        model=MEMORY_AGENT_MODEL,
+        prompt=(
+            "You are the memory_agent. Keep compact shared context for the team: decisions, assumptions, "
+            "tool outcomes, and next useful facts."
+        ),
+    ),
+}
+
+
+def get_agent(agent_name: str) -> AgentSpec:
+    try:
+        return AGENT_SPECS[agent_name]
+    except KeyError as exc:
+        raise ValueError(f"Unknown agent: {agent_name}") from exc
+
+
+def agent_prompt(agent_name: str, task_prompt: str, collaboration_context: str = "") -> str:
+    spec = get_agent(agent_name)
+    context = collaboration_context.strip()
+    context_text = f"\n\nShared multi-agent context:\n{context}" if context else ""
+    return f"""{spec.prompt}
+
+Dedicated role:
+{spec.role}
+{context_text}
+
+Agent task:
+{task_prompt}
+"""
+
+
+def call_agent(agent_name: str, task_prompt: str, collaboration_context: str = "") -> str:
+    spec = get_agent(agent_name)
+    prompt = agent_prompt(agent_name, task_prompt, collaboration_context)
+    return call_llm(prompt, model=spec.model)
+
+
+def agent_roster() -> list[dict[str, str]]:
+    return [
+        {
+            "name": spec.name,
+            "role": spec.role,
+            "model": spec.model,
+            "prompt": spec.prompt,
+        }
+        for spec in AGENT_SPECS.values()
+    ]
+
+
+def append_agent_message(
+    memory: dict[str, Any],
+    agent_name: str,
+    message: str,
+    *,
+    phase: str,
+    metadata: dict[str, Any] | None = None,
+) -> dict[str, Any]:
+    event = {
+        "agent": agent_name,
+        "role": get_agent(agent_name).role,
+        "model": get_agent(agent_name).model,
+        "phase": phase,
+        "message": message,
+    }
+    if metadata:
+        event["metadata"] = metadata
+    memory.setdefault("agent_messages", []).append(event)
+    memory["last_agent"] = agent_name
+    return event
+
+
+def collaboration_context(memory: dict[str, Any], limit: int = 8) -> str:
+    messages = memory.get("agent_messages", [])
+    if not isinstance(messages, list) or not messages:
+        return "No prior multi-agent messages."
+
+    lines: list[str] = []
+    for message in messages[-limit:]:
+        if not isinstance(message, dict):
+            continue
+        agent_name = message.get("agent", "unknown_agent")
+        phase = message.get("phase", "unknown")
+        text = str(message.get("message", ""))[:600]
+        lines.append(f"- {agent_name} [{phase}]: {text}")
+
+    return "\n".join(lines) if lines else "No prior multi-agent messages."
+
+
+__all__ = [
+    "AGENT_SPECS",
+    "CODER_AGENT",
+    "DEBUGGER_AGENT",
+    "MEMORY_AGENT",
+    "ORCHESTRATOR_AGENT",
+    "PLANNER_AGENT",
+    "REVIEWER_AGENT",
+    "TESTER_AGENT",
+    "AgentSpec",
+    "agent_prompt",
+    "agent_roster",
+    "append_agent_message",
+    "call_agent",
+    "collaboration_context",
+    "get_agent",
+]

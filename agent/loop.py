@@ -8,13 +8,25 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from agent.memory import append_event, get_context_summary, load_memory, save_memory
+from agent.multi_agent import (
+    CODER_AGENT,
+    DEBUGGER_AGENT,
+    MEMORY_AGENT,
+    ORCHESTRATOR_AGENT,
+    PLANNER_AGENT,
+    REVIEWER_AGENT,
+    TESTER_AGENT,
+    agent_roster,
+    append_agent_message,
+    call_agent,
+    collaboration_context,
+)
 from agent.parser import parse_action
 from agent.planner import plan_steps
 from agent.prompts import AUTONOMY_RULES, SYSTEM_PROMPT
 from agent.streaming import short_text
 from config import CONTINUOUS_RUN, MAX_RETRIES, MAX_STEPS as CONFIG_MAX_STEPS, MAX_TOOL_RETRIES
 from executor.tool_executor import execute_tool
-from llm.ollama import call_llm
 
 logger = logging.getLogger(__name__)
 
@@ -181,6 +193,10 @@ def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
         "final_result": None,
         "pending_final": None,
         "repo_context": None,
+        "agents": agent_roster(),
+        "agent_messages": [],
+        "last_agent": None,
+        "collaboration_summary": "",
         "architecture_summary": "",
         "repo_analysis_round": 0,
         "strategy_change_required": False,
@@ -371,6 +387,73 @@ def _repo_context_text(memory: dict[str, Any]) -> str:
         "repo_context": repo_context,
     }
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+
+
+def _collaboration_text(memory: dict[str, Any]) -> str:
+    payload = {
+        "active_agents": memory.get("agents", agent_roster()),
+        "collaboration_summary": memory.get("collaboration_summary", ""),
+        "recent_agent_messages": collaboration_context(memory),
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+
+
+def _record_agent_message(
+    memory: dict[str, Any],
+    agent_name: str,
+    message: str,
+    *,
+    phase: str,
+    progress_callback: ProgressCallback | None = None,
+    metadata: dict[str, Any] | None = None,
+) -> None:
+    event = append_agent_message(
+        memory,
+        agent_name,
+        message,
+        phase=phase,
+        metadata=metadata,
+    )
+    _emit_progress(
+        progress_callback,
+        "agent_message",
+        f"{agent_name} completed {phase}",
+        agent=agent_name,
+        phase=phase,
+        agent_event=event,
+        state=memory.get("state"),
+        cycle=memory.get("cycle"),
+        step=memory.get("total_steps"),
+    )
+
+
+def _call_agent(
+    agent_name: str,
+    task_prompt: str,
+    memory: dict[str, Any],
+    *,
+    phase: str,
+    progress_callback: ProgressCallback | None = None,
+) -> str:
+    _emit_progress(
+        progress_callback,
+        "agent_start",
+        f"{agent_name} starting {phase}",
+        agent=agent_name,
+        phase=phase,
+        state=memory.get("state"),
+        cycle=memory.get("cycle"),
+        step=memory.get("total_steps"),
+    )
+    output = call_agent(agent_name, task_prompt, collaboration_context(memory))
+    _record_agent_message(
+        memory,
+        agent_name,
+        _short(output),
+        phase=phase,
+        progress_callback=progress_callback,
+    )
+    return output
 
 
 def _refresh_repo_analysis(
@@ -583,8 +666,18 @@ Reponds uniquement en JSON:
 """
 
 
-def _request_analysis(task: str, memory: dict[str, Any]) -> dict[str, Any]:
-    raw_output = call_llm(_build_analysis_prompt(task, memory))
+def _request_analysis(
+    task: str,
+    memory: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, Any]:
+    raw_output = _call_agent(
+        ORCHESTRATOR_AGENT,
+        _build_analysis_prompt(task, memory),
+        memory,
+        phase="analysis",
+        progress_callback=progress_callback,
+    )
     memory["last_analysis_output"] = raw_output
     parsed = parse_action(raw_output)
     if isinstance(parsed, dict):
@@ -635,6 +728,9 @@ Contexte courant:
 
 Contexte repository initial:
 {_repo_context_text(memory)}
+
+Contexte collaboration multi-agent:
+{_collaboration_text(memory)}
 
 Analyse courante:
 {task_analysis}
@@ -741,8 +837,18 @@ Regles:
 """
 
 
-def _request_action(task: str, memory: dict[str, Any]) -> dict[str, Any] | None:
-    raw_output = call_llm(_build_action_prompt(task, memory))
+def _request_action(
+    task: str,
+    memory: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, Any] | None:
+    raw_output = _call_agent(
+        CODER_AGENT,
+        _build_action_prompt(task, memory),
+        memory,
+        phase="action",
+        progress_callback=progress_callback,
+    )
     memory["last_llm_output"] = raw_output
     parsed = parse_action(raw_output)
     return parsed if isinstance(parsed, dict) else None
@@ -752,9 +858,25 @@ def evaluate_success(
     task: str,
     memory: dict[str, Any],
     last_result: dict[str, Any] | None,
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
     """Ask the LLM whether the task is fully completed."""
-    raw_output = call_llm(_build_evaluate_success_prompt(task, memory, last_result))
+    reviewer_output = _call_agent(
+        REVIEWER_AGENT,
+        _build_evaluate_success_prompt(task, memory, last_result),
+        memory,
+        phase="review",
+        progress_callback=progress_callback,
+    )
+    tester_output = _call_agent(
+        TESTER_AGENT,
+        _build_evaluate_success_prompt(task, memory, last_result),
+        memory,
+        phase="test_verification",
+        progress_callback=progress_callback,
+    )
+    raw_output = reviewer_output
+    memory["last_tester_output"] = tester_output
     memory["last_evaluate_output"] = raw_output
     parsed = parse_action(raw_output)
     if isinstance(parsed, dict) and "success" in parsed:
@@ -853,8 +975,10 @@ def _request_tool_correction(
     error_text: str,
     retry_number: int,
     failure_history: list[dict[str, Any]],
+    progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any] | None:
-    raw_output = call_llm(
+    raw_output = _call_agent(
+        DEBUGGER_AGENT,
         _build_correction_prompt(
             task=task,
             memory=memory,
@@ -863,11 +987,42 @@ def _request_tool_correction(
             error_text=error_text,
             retry_number=retry_number,
             failure_history=failure_history,
-        )
+        ),
+        memory,
+        phase="debug",
+        progress_callback=progress_callback,
     )
     memory["last_correction_output"] = raw_output
     parsed = parse_action(raw_output)
     return parsed if isinstance(parsed, dict) else None
+
+
+def _summarize_collaboration(
+    memory: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+) -> None:
+    messages = memory.get("agent_messages", [])
+    if not isinstance(messages, list) or not messages:
+        return
+
+    prompt = f"""Summarize this multi-agent collaboration state for future steps.
+
+Return concise plain text, not JSON.
+
+Current task:
+{memory.get("task")}
+
+Recent collaboration:
+{collaboration_context(memory, limit=12)}
+"""
+    summary = _call_agent(
+        MEMORY_AGENT,
+        prompt,
+        memory,
+        phase="memory_summary",
+        progress_callback=progress_callback,
+    )
+    memory["collaboration_summary"] = _short(summary, 1200)
 
 
 def _execute_tool_with_auto_correction(
@@ -990,6 +1145,7 @@ def _execute_tool_with_auto_correction(
             error_text=error_text,
             retry_number=attempt + 1,
             failure_history=failure_history,
+            progress_callback=progress_callback,
         )
 
         if not correction:
@@ -1111,7 +1267,11 @@ def _execute_tool_with_auto_correction(
     )
 
 
-def _verify_result(task: str, memory: dict[str, Any]) -> dict[str, Any]:
+def _verify_result(
+    task: str,
+    memory: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, Any]:
     last_result = memory.get("last_result")
     if not isinstance(last_result, dict):
         return {
@@ -1121,7 +1281,7 @@ def _verify_result(task: str, memory: dict[str, Any]) -> dict[str, Any]:
             "next_step": "retry",
         }
 
-    evaluation = evaluate_success(task, memory, last_result)
+    evaluation = evaluate_success(task, memory, last_result, progress_callback=progress_callback)
     memory["last_success_evaluation"] = evaluation
 
     if evaluation["success"]:
@@ -1226,6 +1386,7 @@ def run_agent_loop(
                 state=STATE_ANALYZE,
                 analysis=analysis,
             )
+            _summarize_collaboration(memory, progress_callback=progress_callback)
             _set_state(memory, STATE_PLAN, status="running")
             save_memory(memory)
             continue
@@ -1242,7 +1403,28 @@ def run_agent_loop(
                         f"{planner_context}\n\nAnalyse courante:\n"
                         f"{json.dumps(memory['task_analysis'], ensure_ascii=False, indent=2)}"
                     )
-                plan = plan_steps(task, planner_context) if use_planner else []
+                if use_planner:
+                    planner_prompt = f"""Build an execution plan for this task.
+
+Task:
+{task}
+
+Context:
+{planner_context}
+
+Return a JSON list of objects with step, goal, and tool_hint.
+"""
+                    raw_plan = _call_agent(
+                        PLANNER_AGENT,
+                        planner_prompt,
+                        memory,
+                        phase="planning",
+                        progress_callback=progress_callback,
+                    )
+                    parsed_plan = parse_action(raw_plan)
+                    plan = parsed_plan if isinstance(parsed_plan, list) else plan_steps(task, planner_context)
+                else:
+                    plan = []
                 memory["plan"] = plan or []
                 memory["consecutive_failures"] = 0
                 _emit_progress(
@@ -1297,7 +1479,7 @@ def run_agent_loop(
             memory["total_steps"] = int(memory.get("total_steps", 0)) + 1
             memory["progression"]["current_step"] = memory["step_in_cycle"]
 
-            action = _request_action(task, memory)
+            action = _request_action(task, memory, progress_callback=progress_callback)
             if not action:
                 result = {
                     "success": False,
@@ -1439,7 +1621,7 @@ def run_agent_loop(
             continue
 
         if state == STATE_VERIFY:
-            verification = _verify_result(task, memory)
+            verification = _verify_result(task, memory, progress_callback=progress_callback)
             memory["last_verification"] = verification
             _emit_progress(
                 progress_callback,

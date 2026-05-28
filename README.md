@@ -13,6 +13,7 @@ anubis-agent/
 │   ├── __init__.py
 │   ├── loop.py         # State machine + main agent loop
 │   ├── memory.py       # Persistent state & learning
+│   ├── multi_agent.py  # Multi-agent roles, prompts, and Ollama model routing
 │   ├── parser.py       # JSON action parser
 │   ├── planner.py      # Task planning
 │   └── prompts.py      # System prompts
@@ -58,21 +59,40 @@ The agent MUST ALWAYS:
 - Up to 3 retry attempts per tool
 - Automatic argument refinement based on error messages
 
-### 4. **Task Validation**
+### 4. **Autonomous Multi-Agent System**
+Anubis runs a collaborative team of specialized agents:
+
+- `orchestrator_agent`: coordinates the task and global strategy
+- `planner_agent`: decomposes work into concrete execution steps
+- `coder_agent`: selects tools and implements changes
+- `reviewer_agent`: reviews correctness and completion
+- `tester_agent`: validates behavior through tests and evidence
+- `debugger_agent`: diagnoses failures and proposes corrected tool calls
+- `memory_agent`: summarizes collaboration and keeps shared context compact
+
+Each agent has:
+- a dedicated role
+- a specialized prompt
+- a dedicated Ollama model configured by environment variable
+
+The agents collaborate through shared runtime memory (`agent_messages` and `collaboration_summary`) and emit live events during streaming.
+
+### 5. **Task Validation**
 Before completion, the agent validates:
 - ✓ All created files exist
 - ✓ All commands succeeded
 - ✓ Task objective is truly achieved
 - If validation fails → Agent continues fixing
 
-### 5. **Memory & Learning**
+### 6. **Memory & Learning**
 - Goal tracking
 - Step success rate
 - Failure history
 - Action replay log
 - Compact state summaries for LLM
+- Multi-agent collaboration transcript and summary
 
-### 6. **Project Introspection**
+### 7. **Project Introspection**
 Automatic detection of:
 - Project type (Node, Python, Docker, Go, Rust, Java)
 - Framework (React, Vue, Django, Flask, FastAPI, etc.)
@@ -134,6 +154,15 @@ export OLLAMA_MODEL="mistral"          # or llama2, neural-chat, etc.
 export LLM_TEMPERATURE="0.7"
 export LLM_MAX_TOKENS="2000"
 export PROJECT_ROOT="$(pwd)"           # Workspace root
+
+# Multi-agent Ollama models
+export ORCHESTRATOR_AGENT_MODEL="$OLLAMA_MODEL"
+export PLANNER_AGENT_MODEL="$OLLAMA_MODEL"
+export CODER_AGENT_MODEL="qwen2.5-coder"
+export REVIEWER_AGENT_MODEL="$OLLAMA_MODEL"
+export TESTER_AGENT_MODEL="$OLLAMA_MODEL"
+export DEBUGGER_AGENT_MODEL="qwen2.5-coder"
+export MEMORY_AGENT_MODEL="$OLLAMA_MODEL"
 
 # Agent behavior
 export MAX_STEPS="30"                  # Max loop iterations

@@ -24,8 +24,11 @@ def _default_memory() -> dict[str, Any]:
         },
         "task": None,
         "steps": [],
+        "agent_messages": [],
         "last_action": None,
         "last_result": None,
+        "last_agent": None,
+        "collaboration_summary": "",
         "final_result": None,
     }
 
@@ -35,7 +38,7 @@ def _normalize_memory(memory: Any) -> dict[str, Any]:
     if isinstance(memory, dict):
         normalized.update(memory)
 
-    for key in ("tasks", "actions", "tool_results", "errors", "steps"):
+    for key in ("tasks", "actions", "tool_results", "errors", "steps", "agent_messages"):
         if not isinstance(normalized.get(key), list):
             normalized[key] = []
 

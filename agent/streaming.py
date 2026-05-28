@@ -83,6 +83,8 @@ def format_progress_event(event: dict[str, Any]) -> str:
 
     details: list[str] = []
     if event_type in {
+        "agent_start",
+        "agent_message",
         "tool_start",
         "tool_result",
         "tool_error",
@@ -90,6 +92,10 @@ def format_progress_event(event: dict[str, Any]) -> str:
         "tool_correction_error",
         "strategy_change",
     }:
+        if event.get("agent"):
+            details.append(f"agent={event['agent']}")
+        if event.get("phase"):
+            details.append(f"phase={event['phase']}")
         if event.get("tool"):
             details.append(f"tool={event['tool']}")
         if event.get("attempt"):
