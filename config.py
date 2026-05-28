@@ -21,6 +21,9 @@ def _normalize_api_base_path(value: str | None, default: str = "/v1") -> str:
 PROJECT_ROOT = Path(
     os.getenv("PROJECT_ROOT", str(Path(__file__).parent.absolute()))
 ).expanduser().resolve()
+WORKSPACE_ROOT = Path(
+    os.getenv("WORKSPACE_ROOT", os.getenv("WORKSPACE_DIR", str(PROJECT_ROOT)))
+).expanduser().resolve()
 
 # LLM Configuration
 OLLAMA_BASE_URL = os.getenv("OLLAMA_BASE_URL", "http://localhost:11434")
@@ -32,6 +35,7 @@ LLM_MAX_TOKENS = int(os.getenv("LLM_MAX_TOKENS", "2000"))
 MAX_STEPS = int(os.getenv("MAX_STEPS", "30"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 MAX_TOOL_RETRIES = int(os.getenv("MAX_TOOL_RETRIES", "3"))
+TOOL_COMMAND_TIMEOUT = int(os.getenv("TOOL_COMMAND_TIMEOUT", "120"))
 CONTINUOUS_RUN = os.getenv("CONTINUOUS_RUN", "true").lower() == "true"
 
 # OpenAI-compatible API
@@ -56,6 +60,7 @@ DEBUG = os.getenv("DEBUG", "false").lower() == "true"
 
 __all__ = [
     "PROJECT_ROOT",
+    "WORKSPACE_ROOT",
     "OLLAMA_BASE_URL",
     "OLLAMA_MODEL",
     "LLM_TEMPERATURE",
@@ -63,6 +68,7 @@ __all__ = [
     "MAX_STEPS",
     "MAX_RETRIES",
     "MAX_TOOL_RETRIES",
+    "TOOL_COMMAND_TIMEOUT",
     "CONTINUOUS_RUN",
     "API_HOST",
     "API_PORT",

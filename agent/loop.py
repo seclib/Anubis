@@ -18,6 +18,7 @@ from llm.ollama import call_llm
 logger = logging.getLogger(__name__)
 
 MAX_STEPS = CONFIG_MAX_STEPS
+MAX_SELF_HEALING_RETRIES = max(0, min(MAX_TOOL_RETRIES, 3))
 MAX_BLOCKED_CYCLES = 3
 
 STATE_INIT = "INIT"
@@ -34,6 +35,11 @@ TOOL_SPECS = {
     "list_files": {"path": "<path>"},
     "run_command": {"cmd": "<shell command>"},
     "search_code": {"query": "<pattern>", "path": "<optional path>"},
+    "scan_repo_tree": {"root": "<optional path>"},
+    "detect_project_type": {"root": "<optional path>"},
+    "find_entrypoints": {"root": "<optional path>"},
+    "find_file": {"name": "<filename>"},
+    "get_file_tree": {"path": "<path>"},
     "final": {"result": "<result>"},
 }
 
@@ -57,6 +63,21 @@ def _short(value: Any, limit: int = 1200) -> str:
     else:
         text = str(value)
     return text[:limit]
+
+
+def _coerce_bool(value: Any, default: bool = False) -> bool:
+    if isinstance(value, bool):
+        return value
+    if value is None:
+        return default
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"true", "1", "yes", "y", "on"}:
+            return True
+        if normalized in {"false", "0", "no", "n", "off"}:
+            return False
+        return default
+    return bool(value)
 
 
 def _emit_progress(
@@ -162,10 +183,19 @@ def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
         "last_verification": None,
         "final_result": None,
         "pending_final": None,
+        "repo_context": None,
+        "architecture_summary": "",
+        "repo_analysis_round": 0,
         "strategy_change_required": False,
         "strategy_change_reason": "",
         "blocked_retry": None,
         "last_tool_analysis": None,
+        "last_repo_analysis": None,
+        "self_healing": {
+            "max_tool_retries": MAX_SELF_HEALING_RETRIES,
+            "persistent_failures": 0,
+            "last_failure": None,
+        },
     }
     return memory
 
@@ -267,6 +297,166 @@ def _reset_cycle(memory: dict[str, Any], reason: str) -> bool:
     return memory["cycles_without_progress"] >= MAX_BLOCKED_CYCLES
 
 
+def _as_text_list(value: Any) -> list[str]:
+    if isinstance(value, list):
+        return [str(item) for item in value if str(item).strip()]
+    if isinstance(value, tuple):
+        return [str(item) for item in value if str(item).strip()]
+    if value is None:
+        return []
+    text = str(value).strip()
+    return [text] if text else []
+
+
+def _check_output(snapshot: dict[str, Any], tool_name: str) -> Any:
+    for check in snapshot.get("checks", []):
+        if check.get("tool") != tool_name:
+            continue
+        result = check.get("result", {})
+        if isinstance(result, dict) and result.get("success"):
+            return result.get("output")
+    return []
+
+
+def _build_architecture_context(snapshot: dict[str, Any]) -> dict[str, Any]:
+    project_types = _as_text_list(_check_output(snapshot, "detect_project_type"))
+    repo_tree = _as_text_list(_check_output(snapshot, "scan_repo_tree"))
+    entrypoints = _as_text_list(_check_output(snapshot, "find_entrypoints"))
+
+    top_level_directories = sorted(
+        {
+            item.split("/", 1)[0]
+            for item in repo_tree
+            if "/" in item and item.split("/", 1)[0]
+        }
+    )[:20]
+    top_level_files = sorted(
+        {
+            item
+            for item in repo_tree
+            if "/" not in item
+        }
+    )[:30]
+    important_files = [
+        item
+        for item in repo_tree
+        if item in {"README.md", "Dockerfile", "docker-compose.yml", "requirements.txt", "pyproject.toml"}
+        or item.endswith(("/main.py", "/__init__.py"))
+    ][:30]
+
+    project_description = ", ".join(project_types) if project_types else "unknown stack"
+    entrypoint_description = ", ".join(entrypoints[:5]) if entrypoints else "no entrypoint detected"
+    directory_description = ", ".join(top_level_directories[:8]) if top_level_directories else "no top-level directories detected"
+    summary = (
+        f"Project stack: {project_description}. "
+        f"Entrypoints: {entrypoint_description}. "
+        f"Main directories: {directory_description}."
+    )
+
+    return {
+        "summary": summary,
+        "languages_frameworks": project_types,
+        "entrypoints": entrypoints,
+        "top_level_directories": top_level_directories,
+        "top_level_files": top_level_files,
+        "important_files": important_files,
+        "structure_sample": repo_tree[:80],
+    }
+
+
+def _repo_context_text(memory: dict[str, Any]) -> str:
+    repo_context = memory.get("repo_context") or {}
+    if not isinstance(repo_context, dict):
+        repo_context = {}
+
+    payload = {
+        "architecture_summary": memory.get("architecture_summary", ""),
+        "repo_context": repo_context,
+    }
+    return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
+
+
+def _refresh_repo_analysis(
+    memory: dict[str, Any],
+    reason: str,
+    progress_callback: ProgressCallback | None = None,
+    analysis_type: str = "self_healing",
+) -> dict[str, Any]:
+    checks = [
+        ("detect_project_type", {"root": "."}),
+        ("scan_repo_tree", {"root": "."}),
+        ("find_entrypoints", {"root": "."}),
+    ]
+    snapshot = {
+        "reason": reason,
+        "type": analysis_type,
+        "created_at": _now_iso(),
+        "checks": [],
+    }
+    initial_analysis = analysis_type == "initial"
+
+    _emit_progress(
+        progress_callback,
+        "repo_analysis_start",
+        "Analyzing repository architecture"
+        if initial_analysis
+        else "Refreshing repository analysis after persistent tool failure",
+        state=memory.get("state"),
+        reason=reason,
+        analysis_type=analysis_type,
+    )
+
+    for tool_name, tool_args in checks:
+        result = execute_tool(tool_name, tool_args)
+        snapshot["checks"].append(
+            {
+                "tool": tool_name,
+                "args": tool_args,
+                "result": result,
+            }
+        )
+        _record_event(
+            memory=memory,
+            step=int(memory.get("total_steps", 0)),
+            action="repo_analysis",
+            tool=tool_name,
+            args=tool_args,
+            result=result,
+            reason=reason,
+            next_step="reanalyze task with refreshed repository context",
+            metadata={
+                "repo_analysis": True,
+                "self_healing": not initial_analysis,
+                "analysis_type": analysis_type,
+            },
+        )
+
+    architecture_context = _build_architecture_context(snapshot)
+    snapshot["architecture"] = architecture_context
+    snapshot["summary"] = architecture_context["summary"]
+    memory["last_repo_analysis"] = snapshot
+    memory["repo_context"] = architecture_context
+    memory["architecture_summary"] = architecture_context["summary"]
+    memory["repo_analysis_round"] = int(memory.get("repo_analysis_round", 0)) + 1
+    memory.setdefault("progression", {})
+    memory["progression"]["repo_analysis_round"] = memory["repo_analysis_round"]
+    memory["progression"]["architecture_summary"] = memory["architecture_summary"]
+    memory.setdefault("self_healing", {})
+    if not initial_analysis:
+        memory["self_healing"]["last_repo_analysis"] = snapshot
+    _emit_progress(
+        progress_callback,
+        "repo_analysis",
+        "Repository architecture analyzed" if initial_analysis else "Repository analysis refreshed",
+        state=STATE_ANALYZE,
+        repo_analysis=snapshot,
+        repo_context=architecture_context,
+        architecture_summary=architecture_context["summary"],
+        analysis_type=analysis_type,
+    )
+    return snapshot
+
+
 def _normalize_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
     uncertainty = str(analysis.get("uncertainty", "medium")).lower()
     if uncertainty not in {"low", "medium", "high"}:
@@ -298,6 +488,7 @@ def _normalize_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
 
 def _fallback_analysis(task: str, memory: dict[str, Any]) -> dict[str, Any]:
     current_context = get_context_summary(memory)
+    repo_context = _repo_context_text(memory)
     return _normalize_analysis(
         {
             "summary": task.strip(),
@@ -316,7 +507,7 @@ def _fallback_analysis(task: str, memory: dict[str, Any]) -> dict[str, Any]:
                 "Plan the minimal change set.",
                 "Execute and verify incrementally.",
             ],
-            "recommended_focus": current_context,
+            "recommended_focus": f"{current_context}\n\nRepository context:\n{repo_context}",
             "next_step": "inspect the repository and form an execution plan",
         }
     )
@@ -338,6 +529,9 @@ Cycle actuel:
 Contexte courant:
 {context}
 
+Contexte repository initial:
+{_repo_context_text(memory)}
+
 Derniere analyse:
 {_short(memory.get("task_analysis"))}
 
@@ -346,6 +540,9 @@ Derniere action:
 
 Dernier resultat:
 {_short(memory.get("last_result"))}
+
+Derniere analyse repo self-healing:
+{_short(memory.get("last_repo_analysis"))}
 
 Reponds uniquement en JSON:
 {{
@@ -405,6 +602,9 @@ Plan courant:
 Contexte courant:
 {context}
 
+Contexte repository initial:
+{_repo_context_text(memory)}
+
 Analyse courante:
 {task_analysis}
 
@@ -419,6 +619,9 @@ Dernier resultat:
 
 Derniere analyse d'erreur tool:
 {_short(memory.get("last_tool_analysis"))}
+
+Derniere analyse repo self-healing:
+{_short(memory.get("last_repo_analysis"))}
 
 Changement de strategie requis:
 {memory.get("strategy_change_required", False)}
@@ -483,6 +686,9 @@ Dernier resultat:
 Contexte recent:
 {get_context_summary(memory)}
 
+Contexte repository initial:
+{_repo_context_text(memory)}
+
 Reponds uniquement en JSON:
 {{
   "success": true,
@@ -517,7 +723,7 @@ def evaluate_success(
     parsed = parse_action(raw_output)
     if isinstance(parsed, dict) and "success" in parsed:
         return {
-            "success": bool(parsed.get("success")),
+            "success": _coerce_bool(parsed.get("success"), default=False),
             "reason": str(parsed.get("reason", "")),
         }
 
@@ -551,9 +757,10 @@ def _build_correction_prompt(
     retry_number: int,
     failure_history: list[dict[str, Any]],
 ) -> str:
+    max_retries = MAX_SELF_HEALING_RETRIES
     return f"""{SYSTEM_PROMPT}
 
-Tu fais de l'auto-correction de tool pour un agent autonome.
+Tu fais du self-healing de tool pour un agent autonome.
 
 Task utilisateur:
 {task}
@@ -568,7 +775,7 @@ Erreur observee:
 {error_text}
 
 Retry actuel:
-{retry_number}/{MAX_TOOL_RETRIES}
+{retry_number}/{max_retries}
 
 Historique des echecs de ce tool:
 {json.dumps(failure_history, ensure_ascii=False, indent=2)}
@@ -576,8 +783,17 @@ Historique des echecs de ce tool:
 Contexte recent:
 {get_context_summary(memory)}
 
-Analyse l'erreur puis propose des arguments corriges pour RETENTER LE MEME TOOL.
-Ne change pas de tool ici. Si tu ne peux pas corriger de facon fiable, renvoie retry=false.
+Contexte repository initial:
+{_repo_context_text(memory)}
+
+Derniere analyse repo self-healing:
+{_short(memory.get("last_repo_analysis"))}
+
+Workflow obligatoire:
+1. Analyse l'erreur observee.
+2. Genere une correction concrete des arguments.
+3. Demande retry=true uniquement si le meme tool peut etre retente de facon utile.
+4. Ne change pas de tool ici. Si tu ne peux pas corriger de facon fiable, renvoie retry=false.
 
 Reponds uniquement en JSON:
 {{
@@ -626,17 +842,20 @@ def _execute_tool_with_auto_correction(
 ) -> tuple[dict[str, Any], bool]:
     current_args = args
     failure_history: list[dict[str, Any]] = []
+    max_retries = MAX_SELF_HEALING_RETRIES
+    max_attempts = max_retries + 1
 
-    for attempt in range(0, MAX_TOOL_RETRIES + 1):
+    for attempt in range(0, max_attempts):
         retry_number = attempt + 1
         _emit_progress(
             progress_callback,
             "tool_start",
-            f"Running tool `{tool}` (attempt {retry_number}/{MAX_TOOL_RETRIES + 1})",
+            f"Running tool `{tool}` (attempt {retry_number}/{max_attempts})",
             tool=tool,
             args=current_args,
             attempt=retry_number,
-            max_attempts=MAX_TOOL_RETRIES + 1,
+            max_attempts=max_attempts,
+            max_retries=max_retries,
             state=memory.get("state"),
             step=memory.get("total_steps"),
         )
@@ -677,6 +896,13 @@ def _execute_tool_with_auto_correction(
                 step=memory.get("total_steps"),
             )
             if attempt > 0:
+                memory.setdefault("self_healing", {})
+                memory["self_healing"]["last_success"] = {
+                    "tool": tool,
+                    "retry_count": attempt,
+                    "final_args": current_args,
+                    "completed_at": _now_iso(),
+                }
                 memory["last_tool_analysis"] = {
                     "tool": tool,
                     "analysis": "Auto-correction succeeded",
@@ -687,6 +913,7 @@ def _execute_tool_with_auto_correction(
 
         failure_entry = {
             "attempt": retry_number,
+            "retry": attempt,
             "args": current_args,
             "error": error_text,
         }
@@ -695,6 +922,7 @@ def _execute_tool_with_auto_correction(
             "tool": tool,
             "analysis": "Tool execution failed",
             "retry_count": attempt,
+            "max_retries": max_retries,
             "last_error": error_text,
             "current_args": current_args,
         }
@@ -711,7 +939,7 @@ def _execute_tool_with_auto_correction(
             step=memory.get("total_steps"),
         )
 
-        if attempt >= MAX_TOOL_RETRIES:
+        if attempt >= max_retries:
             break
 
         correction = _request_tool_correction(
@@ -739,7 +967,7 @@ def _execute_tool_with_auto_correction(
             break
 
         analysis = str(correction.get("analysis", ""))
-        retry = bool(correction.get("retry", True))
+        retry = _coerce_bool(correction.get("retry"), default=True)
         corrected_args = correction.get("args")
         correction_reason = str(correction.get("reason", ""))
 
@@ -751,6 +979,7 @@ def _execute_tool_with_auto_correction(
             "analysis": analysis,
             "retry": retry,
             "retry_count": attempt + 1,
+            "max_retries": max_retries,
             "reason": correction_reason,
             "previous_args": current_args,
             "proposed_args": corrected_args,
@@ -788,8 +1017,21 @@ def _execute_tool_with_auto_correction(
     final_error = failure_history[-1]["error"] if failure_history else "Unknown tool failure"
     memory["strategy_change_required"] = True
     memory["strategy_change_reason"] = (
-        f"Tool '{tool}' failed after {len(failure_history)} attempts. Change strategy."
+        f"Tool '{tool}' failed after {len(failure_history)} attempt(s) "
+        f"and {max_retries} self-healing retry slot(s). Change strategy."
     )
+    memory["repo_reanalysis_required"] = True
+    memory.setdefault("self_healing", {})
+    memory["self_healing"]["persistent_failures"] = (
+        int(memory["self_healing"].get("persistent_failures", 0)) + 1
+    )
+    memory["self_healing"]["last_failure"] = {
+        "tool": tool,
+        "initial_args": args,
+        "last_args": current_args,
+        "failure_history": failure_history,
+        "failed_at": _now_iso(),
+    }
     memory["blocked_retry"] = {
         "tool": tool,
         "initial_args": args,
@@ -799,7 +1041,7 @@ def _execute_tool_with_auto_correction(
     memory["last_tool_analysis"] = {
         "tool": tool,
         "analysis": "Auto-correction exhausted",
-        "retry_limit": MAX_TOOL_RETRIES,
+        "retry_limit": max_retries,
         "failure_history": failure_history,
     }
     _emit_progress(
@@ -819,8 +1061,10 @@ def _execute_tool_with_auto_correction(
                 "error": final_error,
                 "tool": tool,
                 "attempts": len(failure_history),
+                "retry_limit": max_retries,
                 "failure_history": failure_history,
                 "strategy_change_required": True,
+                "repo_reanalysis_required": True,
             },
         },
         True,
@@ -909,11 +1153,17 @@ def run_agent_loop(
             memory["successful_tools_at_cycle_start"] = int(memory.get("successful_tools", 0))
             memory["cycles_without_progress"] = 0
             memory["blockage_reason"] = ""
+            _refresh_repo_analysis(
+                memory,
+                reason="Initial repository analysis",
+                progress_callback=progress_callback,
+                analysis_type="initial",
+            )
             _set_state(memory, STATE_ANALYZE, status="running")
             _emit_progress(
                 progress_callback,
                 "transition",
-                "Initializing run and moving to analysis",
+                "Initial repository analysis complete, moving to task analysis",
                 state=STATE_ANALYZE,
             )
             save_memory(memory)
@@ -924,6 +1174,7 @@ def run_agent_loop(
             memory["task_analysis"] = analysis
             memory["analysis_round"] = int(memory.get("analysis_round", 0)) + 1
             memory["consecutive_failures"] = 0
+            memory["repo_reanalysis_required"] = False
             memory.setdefault("progression", {})
             memory["progression"]["analysis_round"] = memory["analysis_round"]
             memory["progression"]["current_step"] = 0
@@ -942,6 +1193,10 @@ def run_agent_loop(
         if state == STATE_PLAN:
             try:
                 planner_context = get_context_summary(memory)
+                planner_context = (
+                    f"{planner_context}\n\nContexte repository initial:\n"
+                    f"{_repo_context_text(memory)}"
+                )
                 if memory.get("task_analysis"):
                     planner_context = (
                         f"{planner_context}\n\nAnalyse courante:\n"
@@ -1108,29 +1363,28 @@ def run_agent_loop(
             if change_strategy:
                 memory["pending_final"] = None
                 memory["consecutive_failures"] = int(memory.get("consecutive_failures", 0)) + 1
-                if memory["consecutive_failures"] > MAX_RETRIES:
-                    logger.warning(
-                        "Too many consecutive strategy failures (%s), reanalyzing",
-                        memory["consecutive_failures"],
+                reason = memory.get("strategy_change_reason") or "Persistent tool failure"
+                _refresh_repo_analysis(
+                    memory,
+                    reason=reason,
+                    progress_callback=progress_callback,
+                )
+                blocked = _reset_cycle(memory, reason)
+                _emit_progress(
+                    progress_callback,
+                    "strategy_change",
+                    "Persistent tool failure: strategy changed and repo analysis restarted",
+                    state=STATE_ANALYZE,
+                    result=result,
+                    reason=reason,
+                    cycle=memory.get("cycle"),
+                )
+                if blocked:
+                    return _stop_for_total_blockage(
+                        memory,
+                        memory.get("blockage_reason", "Total blockage detected"),
+                        progress_callback=progress_callback,
                     )
-                    memory["consecutive_failures"] = 0
-                    _emit_progress(
-                        progress_callback,
-                        "cycle_restart",
-                        "Too many strategy failures, reanalyzing automatically",
-                        state=STATE_ANALYZE,
-                        result=result,
-                    )
-                    _set_state(memory, STATE_ANALYZE, status="running")
-                else:
-                    _emit_progress(
-                        progress_callback,
-                        "transition",
-                        "Tool failed after retries, switching to FIX",
-                        state=STATE_FIX,
-                        result=result,
-                    )
-                    _set_state(memory, STATE_FIX, status="running")
             else:
                 memory["consecutive_failures"] = 0
                 _emit_progress(
@@ -1249,6 +1503,7 @@ def run_agent_loop(
 
 __all__ = [
     "MAX_STEPS",
+    "MAX_SELF_HEALING_RETRIES",
     "STATE_COMPLETE",
     "STATE_ANALYZE",
     "STATE_EXECUTE",

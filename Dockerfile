@@ -9,6 +9,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_NO_CACHE_DIR=1 \
     APP_HOME=/opt/anubis-agent \
     WORKSPACE_DIR=/workspace \
+    WORKSPACE_ROOT=/workspace \
     PYTHONPATH=/opt/anubis-agent \
     PROJECT_ROOT=/workspace \
     HOME=/tmp \

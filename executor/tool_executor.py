@@ -15,6 +15,7 @@ from tools.repo import (
     scan_repo_tree,
     search_code,
 )
+from tools.sandbox import SandboxViolation, audit_tool_action
 from tools.terminal import run_command
 
 logger = logging.getLogger(__name__)
@@ -38,22 +39,42 @@ TOOLS: dict[str, ToolFunction] = {
 def execute_tool(tool: str, args: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Execute a tool and return a normalized result payload."""
     if tool not in TOOLS:
-        return {"success": False, "output": f"Unknown tool: {tool}"}
+        result = {"success": False, "output": f"Unknown tool: {tool}"}
+        audit_tool_action("denied", tool, args=args, success=False, result=result)
+        return result
 
     if args is None:
         args = {}
     elif not isinstance(args, Mapping):
-        return {
+        result = {
             "success": False,
             "output": f"Invalid args for {tool}: expected a mapping, got {type(args).__name__}",
         }
+        audit_tool_action("denied", tool, args={}, success=False, result=result)
+        return result
 
+    normalized_args = dict(args)
+    audit_tool_action("start", tool, args=normalized_args)
     try:
-        result = TOOLS[tool](**dict(args))
-        return {"success": True, "output": result}
+        output = TOOLS[tool](**normalized_args)
+        result = {"success": True, "output": output}
+        audit_tool_action("success", tool, args=normalized_args, success=True, result=result)
+        return result
+    except SandboxViolation as exc:
+        result = {
+            "success": False,
+            "output": {
+                "error": str(exc),
+                "type": exc.__class__.__name__,
+                "sandbox": True,
+            },
+        }
+        audit_tool_action("denied", tool, args=normalized_args, success=False, error=str(exc))
+        logger.warning("Sandbox denied tool '%s': %s", tool, exc)
+        return result
     except Exception as exc:
         logger.exception("Error while executing tool '%s'", tool)
-        return {
+        result = {
             "success": False,
             "output": {
                 "error": str(exc),
@@ -61,6 +82,8 @@ def execute_tool(tool: str, args: Mapping[str, Any] | None = None) -> dict[str, 
                 "traceback": traceback.format_exc(),
             },
         }
+        audit_tool_action("failure", tool, args=normalized_args, success=False, error=str(exc))
+        return result
 
 
 __all__ = ["TOOLS", "execute_tool"]

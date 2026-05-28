@@ -8,6 +8,8 @@ import subprocess
 from pathlib import Path
 from typing import Any
 
+from tools.sandbox import resolve_workspace_path, workspace_root
+
 IGNORED_PARTS = {
     ".git",
     ".hg",
@@ -57,8 +59,10 @@ def _to_relative(root: Path, path: Path) -> str:
 
 
 def _iter_repo_paths(root: str = ".") -> tuple[Path, list[Path]]:
-    root_path = Path(root)
+    root_path = resolve_workspace_path(root, must_exist=False)
     if not root_path.exists():
+        return root_path, []
+    if not root_path.is_dir():
         return root_path, []
 
     paths = [
@@ -100,7 +104,7 @@ def scan_repo_tree(root: str = ".", path: str | None = None) -> list[str]:
 def detect_project_type(root: str = ".", path: str | None = None) -> list[str]:
     """Heuristically detect the project type from common marker files."""
     root = _resolve_root(root, path)
-    root_path = Path(root)
+    root_path = resolve_workspace_path(root, must_exist=False)
     _, repo_paths = _iter_repo_paths(root)
     detected: list[str] = []
 
@@ -175,22 +179,25 @@ def search_code(query: str, root: str = ".", path: str | None = None) -> list[st
     if not query:
         return []
     root = _resolve_root(root, path)
+    root_path = resolve_workspace_path(root, must_exist=True)
 
     rg_path = shutil.which("rg")
     if rg_path:
         result = subprocess.run(
-            [rg_path, "-n", "--hidden", "--glob", "!.git", query, root],
+            [rg_path, "-n", "--hidden", "--glob", "!.git", "--", query, str(root_path)],
             capture_output=True,
             text=True,
             check=False,
+            cwd=str(workspace_root()),
         )
         return result.stdout.strip().splitlines() if result.stdout else []
 
     result = subprocess.run(
-        ["grep", "-rHn", query, root],
+        ["grep", "-rHn", "--", query, str(root_path)],
         capture_output=True,
         text=True,
         check=False,
+        cwd=str(workspace_root()),
     )
     return result.stdout.strip().splitlines() if result.stdout else []
 
@@ -261,7 +268,7 @@ def scan_full_repo(root: str = ".", path: str | None = None) -> list[str]:
 def detect_framework(root: str = ".", path: str | None = None) -> list[str]:
     """Return framework-level detections derived from project files."""
     root = _resolve_root(root, path)
-    root_path = Path(root)
+    root_path = resolve_workspace_path(root, must_exist=False)
     frameworks: list[str] = []
 
     package_json = root_path / "package.json"

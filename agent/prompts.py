@@ -23,7 +23,7 @@ PLANNING RULE:
 - Use Codex-like behavior for file edits, command execution, and repetitive tasks.
 
 FAILURE HANDLING:
-- If a tool fails: analyze the error, retry once with correction, then switch strategy if needed.
+- If a tool fails: analyze the error, request a correction, retry the tool up to 3 times, then switch strategy and inspect the repo again if needed.
 
 REASONING STYLE:
 - Think in steps internally.
@@ -56,7 +56,7 @@ Available tools:
 
 IMPORTANT:
 - If uncertainty is high, inspect the repository first using repo tools before making edits.
-- If a tool fails, retry once with a corrected call, then switch strategy.
+- If a tool fails, retry with corrected calls up to 3 times, then switch strategy and inspect the repository again.
 - When the task is completed, return:
   {"uncertainty": "low", "intent": "final", "tool": "none", "args": {"result": "..."}, "reason": "task complete", "next_action": ""}
 
