@@ -9,6 +9,17 @@ services:
     container_name: anubis-agent
     restart: unless-stopped
     init: true
+    user: "${UID:-1000}:${GID:-1000}"
+    privileged: false
+    pids_limit: ${ANUBIS_PIDS_LIMIT:-256}
+    mem_limit: ${ANUBIS_MEMORY_LIMIT:-2g}
+    cpus: ${ANUBIS_CPUS:-2}
+    oom_kill_disable: false
+    ulimits:
+      nofile:
+        soft: 1024
+        hard: 2048
+      nproc: 256
     environment:
       API_HOST: 0.0.0.0
       API_PORT: 8000
@@ -33,16 +44,25 @@ services:
       MEMORY_AGENT_MODEL: ${MEMORY_AGENT_MODEL:-${OLLAMA_MODEL:-mistral}}
       PROJECT_ROOT: /workspace
       WORKSPACE_ROOT: /workspace
+      WORKSPACE_DIR: /workspace
+      INIT_WORKSPACE_GIT: ${INIT_WORKSPACE_GIT:-true}
       TOOL_COMMAND_TIMEOUT: ${TOOL_COMMAND_TIMEOUT:-120}
+      TOOL_COMMAND_MAX_LENGTH: ${TOOL_COMMAND_MAX_LENGTH:-4000}
+      TOOL_OUTPUT_MAX_CHARS: ${TOOL_OUTPUT_MAX_CHARS:-20000}
+      TOOL_AUDIT_FILE: ${TOOL_AUDIT_FILE:-state/tool_audit.log}
       PYTHONDONTWRITEBYTECODE: "1"
       PYTHONUNBUFFERED: "1"
     volumes:
-      - ./:/workspace
+      - type: volume
+        source: anubis-workspace
+        target: /workspace
+        volume:
+          nocopy: true
     working_dir: /workspace
     read_only: true
     tmpfs:
-      - /tmp
-      - /run
+      - /tmp:rw,noexec,nosuid,nodev,size=64m
+      - /run:rw,noexec,nosuid,nodev,size=16m
     cap_drop:
       - ALL
     security_opt:
@@ -72,4 +92,5 @@ services:
       - "3000:8080"
 
 volumes:
+  anubis-workspace:
   open-webui-data:

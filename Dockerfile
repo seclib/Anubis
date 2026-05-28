@@ -17,6 +17,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 
 WORKDIR ${APP_HOME}
 
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git \
+    && rm -rf /var/lib/apt/lists/*
+
 COPY requirements.txt .
 RUN python -m pip install --upgrade pip \
     && python -m pip install -r requirements.txt
@@ -26,6 +30,7 @@ COPY . ${APP_HOME}
 RUN groupadd --gid ${GROUP_ID} anubis \
     && useradd --uid ${USER_ID} --gid ${GROUP_ID} --no-create-home --shell /usr/sbin/nologin anubis \
     && mkdir -p ${WORKSPACE_DIR} \
+    && chmod +x ${APP_HOME}/docker/entrypoint.sh \
     && chown -R anubis:anubis ${APP_HOME} ${WORKSPACE_DIR}
 
 USER anubis
@@ -37,4 +42,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import json, urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); payload = json.loads(response.read().decode()); raise SystemExit(0 if payload.get('status') == 'ok' else 1)"
 
-ENTRYPOINT ["python", "-m", "app.main"]
+ENTRYPOINT ["/opt/anubis-agent/docker/entrypoint.sh"]
+CMD ["python", "-m", "app.main"]

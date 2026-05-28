@@ -114,6 +114,14 @@ Automatic detection of:
 - Records commit history locally and can rollback the last autonomous commit
 - Aborts commits when validation fails to avoid committing broken work
 
+### 10. **Docker Sandbox Hardening**
+- Runs as a non-root user with all Linux capabilities dropped
+- Uses a read-only container root filesystem plus small `noexec` tmpfs mounts
+- Keeps `/workspace` in an isolated Docker volume by default, not a host bind mount
+- Enforces shell command timeouts, output caps, path validation, and forbidden command checks
+- Writes a persistent tool audit log to `state/tool_audit.log`
+- Applies process, CPU, memory, and file-descriptor limits in Docker Compose
+
 ## Module Responsibilities
 
 ### `agent/`
@@ -187,6 +195,10 @@ export MAX_STEPS="30"                  # Max loop iterations
 export MAX_RETRIES="3"                 # Retry attempts per tool
 export MAX_TOOL_RETRIES="3"           # Tool executor retries
 export CONTINUOUS_RUN="true"          # Always run without interruption
+export TOOL_COMMAND_TIMEOUT="120"     # Shell command timeout in seconds
+export TOOL_COMMAND_MAX_LENGTH="4000" # Max accepted command length
+export TOOL_OUTPUT_MAX_CHARS="20000"  # Max captured stdout/stderr chars
+export TOOL_AUDIT_FILE="state/tool_audit.log"
 
 # Autonomous Git
 export AUTO_GIT_COMMIT_ENABLED="true" # Commit automatically after verified success
@@ -319,7 +331,9 @@ docker compose up --build
 ```
 
 The container:
-- mounts the repository at `/workspace`
+- uses an isolated Docker volume at `/workspace` by default
+- seeds `/workspace` from the image on first start
+- initializes an isolated Git repository snapshot when `INIT_WORKSPACE_GIT=true`
 - uses `/workspace` as the project root
 - reaches Ollama through `http://host.docker.internal:11434`
 - exposes the OpenAI-compatible API on `http://localhost:8000/v1`
@@ -327,8 +341,17 @@ The container:
 - supports Open WebUI streaming via `stream=true`
 - allows changing the API path with `API_BASE_PATH`
 - keeps auth disabled unless `API_AUTH_REQUIRED=true`
+- runs with `read_only: true`, `cap_drop: ALL`, `no-new-privileges`, `pids_limit`, CPU/memory limits, and `noexec` tmpfs mounts
+- records every tool action in `state/tool_audit.log`
 
-If your local UID/GID is not `1000`, export `UID` and `GID` before building so the workspace mount stays writable.
+If your local UID/GID is not `1000`, export `UID` and `GID` before building so the workspace volume stays writable.
+
+To inspect or export the isolated workspace:
+
+```bash
+docker compose exec anubis-agent git status --short
+docker compose cp anubis-agent:/workspace ./anubis-workspace-export
+```
 
 ### Checking Memory
 

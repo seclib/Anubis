@@ -4,3 +4,4 @@ __pycache__/
 state/runtime.json
 state/vector_store.json
 state/autonomous_git_history.json
+state/tool_audit.log

@@ -8,6 +8,8 @@ from unittest.mock import patch
 from agent import loop
 from agent import vector_memory
 from tools import git_autonomy
+from tools.sandbox import SandboxViolation, audit_tool_action, validate_command
+from tools.terminal import run_command
 from agent.coder_agent import (
     CODER_PROMPT,
     CODER_RESPONSIBILITIES,
@@ -421,6 +423,47 @@ class AutonomousLoopTest(unittest.TestCase):
             self.assertEqual((repo_root / "README.md").read_text(), "initial\n")
         finally:
             shutil.rmtree(repo_root, ignore_errors=True)
+
+    def test_sandbox_rejects_host_paths_and_shell_escape(self):
+        blocked_commands = [
+            "cat /etc/passwd",
+            "echo $(cat README.md)",
+            "echo ok; pwd",
+            "echo ok && pwd",
+            "curl http://example.com",
+            "PYTHONPATH=/tmp python3 -m unittest",
+        ]
+
+        for command in blocked_commands:
+            with self.subTest(command=command):
+                with self.assertRaises(SandboxViolation):
+                    validate_command(command)
+
+    def test_run_command_returns_timeout_without_hanging(self):
+        with patch("tools.sandbox.TOOL_COMMAND_TIMEOUT", 1):
+            result = run_command("sleep 2")
+
+        self.assertEqual(result["code"], 124)
+        self.assertTrue(result["timeout"])
+
+    def test_tool_audit_writes_workspace_log(self):
+        audit_path = Path("state/test_tool_audit.log").resolve()
+        audit_path.unlink(missing_ok=True)
+        try:
+            with patch("tools.sandbox.TOOL_AUDIT_FILE", Path("state/test_tool_audit.log")):
+                audit_tool_action(
+                    "success",
+                    "read_file",
+                    args={"path": "README.md"},
+                    success=True,
+                    result={"ok": True},
+                )
+
+            content = audit_path.read_text()
+            self.assertIn('"tool": "read_file"', content)
+            self.assertIn('"action": "success"', content)
+        finally:
+            audit_path.unlink(missing_ok=True)
 
     def test_loop_reanalyzes_until_completion_without_human_stop(self):
         events = []

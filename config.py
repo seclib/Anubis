@@ -47,6 +47,9 @@ MAX_STEPS = int(os.getenv("MAX_STEPS", "30"))
 MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 MAX_TOOL_RETRIES = int(os.getenv("MAX_TOOL_RETRIES", "3"))
 TOOL_COMMAND_TIMEOUT = int(os.getenv("TOOL_COMMAND_TIMEOUT", "120"))
+TOOL_COMMAND_MAX_LENGTH = int(os.getenv("TOOL_COMMAND_MAX_LENGTH", "4000"))
+TOOL_OUTPUT_MAX_CHARS = int(os.getenv("TOOL_OUTPUT_MAX_CHARS", "20000"))
+TOOL_AUDIT_FILE = Path(os.getenv("TOOL_AUDIT_FILE", "state/tool_audit.log"))
 CONTINUOUS_RUN = os.getenv("CONTINUOUS_RUN", "true").lower() == "true"
 AUTO_GIT_COMMIT_ENABLED = os.getenv("AUTO_GIT_COMMIT_ENABLED", "true").lower() == "true"
 GIT_USE_TEMP_BRANCH = os.getenv("GIT_USE_TEMP_BRANCH", "false").lower() == "true"
@@ -102,6 +105,9 @@ __all__ = [
     "MAX_RETRIES",
     "MAX_TOOL_RETRIES",
     "TOOL_COMMAND_TIMEOUT",
+    "TOOL_COMMAND_MAX_LENGTH",
+    "TOOL_OUTPUT_MAX_CHARS",
+    "TOOL_AUDIT_FILE",
     "CONTINUOUS_RUN",
     "AUTO_GIT_COMMIT_ENABLED",
     "GIT_USE_TEMP_BRANCH",
