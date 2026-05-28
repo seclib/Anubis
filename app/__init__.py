@@ -1,0 +1,1 @@
+"""Docker-friendly application package."""
