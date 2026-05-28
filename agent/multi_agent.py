@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent.coder_agent import CODER_PROMPT
+from agent.debugger_agent import DEBUGGER_PROMPT
 from agent.tester_agent import TESTER_PROMPT
 from config import (
     CODER_AGENT_MODEL,
@@ -89,12 +90,12 @@ AGENT_SPECS: dict[str, AgentSpec] = {
     ),
     DEBUGGER_AGENT: AgentSpec(
         name=DEBUGGER_AGENT,
-        role="Diagnose failures and produce corrected tool arguments or alternate strategies.",
-        model=DEBUGGER_AGENT_MODEL,
-        prompt=(
-            "You are the debugger_agent. Analyze failed tool calls, identify root causes, and generate "
-            "corrected arguments without asking for human intervention."
+        role=(
+            "Autonomous failure recovery specialist: analyze stack traces, identify probable causes, "
+            "propose corrections, and rerun fixes automatically."
         ),
+        model=DEBUGGER_AGENT_MODEL,
+        prompt=DEBUGGER_PROMPT,
     ),
     MEMORY_AGENT: AgentSpec(
         name=MEMORY_AGENT,

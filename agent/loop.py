@@ -8,6 +8,11 @@ from datetime import datetime, timezone
 from typing import Any, Callable
 
 from agent.coder_agent import build_coder_context, create_coder_state
+from agent.debugger_agent import (
+    build_debugger_context,
+    create_debugger_state,
+    normalize_debugger_report,
+)
 from agent.memory import append_event, get_context_summary, load_memory, save_memory
 from agent.multi_agent import (
     CODER_AGENT,
@@ -211,8 +216,10 @@ def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
         "agents": agent_roster(),
         "orchestration": create_orchestrator_state(task),
         "coder_agent": create_coder_state(),
+        "debugger_agent": create_debugger_state(),
         "tester_agent": create_tester_state(),
         "last_validation_report": None,
+        "last_debugger_report": None,
         "agent_messages": [],
         "last_agent": None,
         "collaboration_summary": "",
@@ -1007,6 +1014,9 @@ Historique des echecs de ce tool:
 Contexte recent:
 {get_context_summary(memory)}
 
+Contexte debugger_agent:
+{build_debugger_context(memory)}
+
 Contexte repository initial:
 {_repo_context_text(memory)}
 
@@ -1057,6 +1067,9 @@ def _request_tool_correction(
     )
     memory["last_correction_output"] = raw_output
     parsed = parse_action(raw_output)
+    debugger_report = normalize_debugger_report(parsed)
+    memory["last_debugger_report"] = debugger_report
+    memory.setdefault("debugger_reports", []).append(debugger_report)
     return parsed if isinstance(parsed, dict) else None
 
 

@@ -10,6 +10,14 @@ from agent.coder_agent import (
     RECOMMENDED_CODER_MODEL,
     build_coder_context,
 )
+from agent.debugger_agent import (
+    DEBUGGER_PROMPT,
+    DEBUGGER_REPORT_SCHEMA,
+    DEBUGGER_RESPONSIBILITIES,
+    DEBUGGER_RULES,
+    build_debugger_context,
+    normalize_debugger_report,
+)
 from agent.orchestrator_agent import (
     ORCHESTRATOR_RESPONSIBILITIES,
     aggregate_results,
@@ -177,6 +185,37 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertEqual(report["commands"], ["python app.py"])
         self.assertEqual(report["errors"][0]["type"], "unknown")
         self.assertEqual(TESTER_REPORT_SCHEMA["success"], "boolean")
+
+    def test_debugger_agent_contract_is_autonomous_and_structured(self):
+        memory = loop._initial_memory("Fix stack trace", use_planner=True)
+        roster = {agent["name"]: agent for agent in memory["agents"]}
+        debugger = roster[loop.DEBUGGER_AGENT]
+
+        self.assertEqual(memory["debugger_agent"]["responsibilities"], DEBUGGER_RESPONSIBILITIES)
+        self.assertIn("analyze_stack_traces", DEBUGGER_RESPONSIBILITIES)
+        self.assertIn("identify_probable_causes", DEBUGGER_RESPONSIBILITIES)
+        self.assertIn("propose_corrections", DEBUGGER_RESPONSIBILITIES)
+        self.assertIn("rerun_fixes_automatically", DEBUGGER_RESPONSIBILITIES)
+        self.assertIn("remain autonomous", DEBUGGER_RULES)
+        self.assertIn("never ask for human help", DEBUGGER_RULES)
+        self.assertEqual(debugger["prompt"], DEBUGGER_PROMPT)
+        self.assertIn("Debugger report schema", build_debugger_context(memory))
+
+        report = normalize_debugger_report(
+            {
+                "analysis": "Path missing",
+                "probable_causes": "wrong path",
+                "retry": True,
+                "args": {"path": "README.md"},
+                "corrections": "use existing file",
+                "reason": "README exists",
+                "evidence": {"stack_trace": "Traceback", "error": "FileNotFoundError"},
+            }
+        )
+        self.assertTrue(report["retry"])
+        self.assertEqual(report["args"], {"path": "README.md"})
+        self.assertEqual(report["probable_causes"], ["wrong path"])
+        self.assertEqual(DEBUGGER_REPORT_SCHEMA["retry"], "boolean")
 
     def test_loop_reanalyzes_until_completion_without_human_stop(self):
         events = []
