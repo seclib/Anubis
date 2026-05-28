@@ -2,7 +2,7 @@
   "version": 1,
   "identity": "Hermes",
   "created_at": "2026-05-28T08:58:11.590472+00:00",
-  "updated_at": "2026-05-28T09:47:47.941089+00:00",
+  "updated_at": "2026-05-28T09:55:12.331254+00:00",
   "entries": [
     {
       "id": "hermes-20260528-085811-590480",
@@ -224,6 +224,70 @@
         "obsidian",
         "daily-note",
         "memory-quality",
+        "user-preference",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260528-095352-085222",
+      "created_at": "2026-05-28T09:53:52.085238+00:00",
+      "updated_at": "2026-05-28T09:53:52.085241+00:00",
+      "summary": "The agent should only store memory that is reusable, preference-related, project-related, or a decision/constraint.",
+      "task": "Store memory eligibility rule",
+      "result": "Only store information that is reusable in future conversations, defines a preference or habit, belongs to an ongoing project, or represents a decision or constraint. Do not store greetings, small talk, duplicate information, or irrelevant context.",
+      "lessons": [
+        "Reject greetings, small talk, duplicate information, and irrelevant context as memory.",
+        "Accept durable preferences, habits, ongoing project facts, decisions, and constraints."
+      ],
+      "tags": [
+        "memory-policy",
+        "storage-filter",
+        "deduplication",
+        "user-preference",
+        "constraint",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260528-095432-369516",
+      "created_at": "2026-05-28T09:54:32.369534+00:00",
+      "updated_at": "2026-05-28T09:54:32.369536+00:00",
+      "summary": "Obsidian memory notes should be structured markdown grouped by topic or date, summarized, and linked to related notes.",
+      "task": "Store Obsidian writing format rule",
+      "result": "When writing to Obsidian, create structured markdown notes, group them by topic or date, summarize instead of dumping raw chat, link related notes when possible, and organize daily memory notes with sections such as key decisions, technical notes, and user preferences.",
+      "lessons": [
+        "Use structured markdown for Obsidian memory.",
+        "Group memory by topic or date.",
+        "Summarize raw chat into durable knowledge.",
+        "Link related notes when possible."
+      ],
+      "tags": [
+        "obsidian",
+        "markdown",
+        "memory-format",
+        "daily-note",
+        "structured-knowledge",
+        "user-preference",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260528-095512-331226",
+      "created_at": "2026-05-28T09:55:12.331245+00:00",
+      "updated_at": "2026-05-28T09:55:12.331247+00:00",
+      "summary": "Retrieved memory should be presented as a concise 'Memory Context' block of relevant facts.",
+      "task": "Store memory retrieval output format rule",
+      "result": "When retrieving memory, format it as '### Memory Context' followed by bullet facts, and use that context only when relevant to the current question.",
+      "lessons": [
+        "Format retrieved context under a Memory Context heading.",
+        "Include concise bullet facts only.",
+        "Apply retrieved memory only when relevant to the question."
+      ],
+      "tags": [
+        "memory-format",
+        "memory-retrieval",
+        "relevance",
+        "structured-output",
         "user-preference",
         "high"
       ]
