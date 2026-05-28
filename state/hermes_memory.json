@@ -1,0 +1,147 @@
+{
+  "version": 1,
+  "identity": "Hermes",
+  "created_at": "2026-05-28T08:58:11.590472+00:00",
+  "updated_at": "2026-05-28T09:03:55.843814+00:00",
+  "entries": [
+    {
+      "id": "hermes-20260528-085811-590480",
+      "created_at": "2026-05-28T08:58:11.590494+00:00",
+      "updated_at": "2026-05-28T09:03:55.843814+00:00",
+      "summary": "The user wants Hermes to maintain persistent long-term memory across conversations using Obsidian notes and vector RAG.",
+      "task": "Extract and store important long-term memory from interaction",
+      "result": "{'memory': 'The user wants Hermes to maintain persistent long-term memory across conversations using Obsidian notes and vector RAG.', 'tags': ['hermes', 'memory', 'obsidian', 'rag', 'long-term'], 'importance': 'high', 'category': 'project'}",
+      "lessons": [
+        "Keep durable, reusable memory only; ignore transient context."
+      ],
+      "tags": [
+        "hermes",
+        "memory",
+        "obsidian",
+        "rag",
+        "long-term",
+        "high",
+        "project"
+      ],
+      "superseded_by": "hermes-principle-memory-continuous-improvement"
+    },
+    {
+      "id": "hermes-20260528-085811-592078",
+      "created_at": "2026-05-28T08:58:11.592086+00:00",
+      "updated_at": "2026-05-28T09:03:55.843814+00:00",
+      "summary": "The user prefers extracted memories to keep only stable facts, project decisions, preferences, recurring patterns, and important technical knowledge.",
+      "task": "Extract and store important long-term memory from interaction",
+      "result": "{'memory': 'The user prefers extracted memories to keep only stable facts, project decisions, preferences, recurring patterns, and important technical knowledge.', 'tags': ['memory-policy', 'user-preference', 'signal-filtering'], 'importance': 'high', 'category': 'user'}",
+      "lessons": [
+        "Keep durable, reusable memory only; ignore transient context."
+      ],
+      "tags": [
+        "memory-policy",
+        "user-preference",
+        "signal-filtering",
+        "high",
+        "user"
+      ],
+      "superseded_by": "hermes-principle-memory-continuous-improvement"
+    },
+    {
+      "id": "hermes-20260528-085811-593491",
+      "created_at": "2026-05-28T08:58:11.593497+00:00",
+      "updated_at": "2026-05-28T09:03:55.843814+00:00",
+      "summary": "The user wants memory outputs formatted as short memory sentences with tags, importance, and category fields.",
+      "task": "Extract and store important long-term memory from interaction",
+      "result": "{'memory': 'The user wants memory outputs formatted as short memory sentences with tags, importance, and category fields.', 'tags': ['output-format', 'memory', 'structured'], 'importance': 'high', 'category': 'user'}",
+      "lessons": [
+        "Keep durable, reusable memory only; ignore transient context."
+      ],
+      "tags": [
+        "output-format",
+        "memory",
+        "structured",
+        "high",
+        "user"
+      ],
+      "superseded_by": "hermes-principle-memory-continuous-improvement"
+    },
+    {
+      "id": "hermes-20260528-085811-594986",
+      "created_at": "2026-05-28T08:58:11.594993+00:00",
+      "updated_at": "2026-05-28T08:58:11.594995+00:00",
+      "summary": "The Anubis/Hermes project is evolving into an autonomous local coding agent with multi-agent orchestration, live execution, sandboxing, Open WebUI integration, and durable memory.",
+      "task": "Extract and store important long-term memory from interaction",
+      "result": "{'memory': 'The Anubis/Hermes project is evolving into an autonomous local coding agent with multi-agent orchestration, live execution, sandboxing, Open WebUI integration, and durable memory.', 'tags': ['anubis', 'hermes', 'autonomous-agent', 'open-webui', 'sandbox', 'multi-agent'], 'importance': 'high', 'category': 'project'}",
+      "lessons": [
+        "Keep durable, reusable memory only; ignore transient context."
+      ],
+      "tags": [
+        "anubis",
+        "hermes",
+        "autonomous-agent",
+        "open-webui",
+        "sandbox",
+        "multi-agent",
+        "high",
+        "project"
+      ]
+    },
+    {
+      "id": "hermes-20260528-090210-287739",
+      "created_at": "2026-05-28T09:02:10.287754+00:00",
+      "updated_at": "2026-05-28T09:03:55.843814+00:00",
+      "summary": "The user wants Hermes to run a memory-augmented reasoning loop before responding.",
+      "task": "Apply Hermes memory-augmented reasoning loop rules",
+      "result": "Hermes should retrieve vector memories, search Obsidian, combine context, reason from stored knowledge, generate a structured response, extract new durable memory, and store it when valuable.",
+      "lessons": [
+        "Prefer learned knowledge over raw generation.",
+        "Prefer stored memory over guessing.",
+        "Prefer structured synthesis over repetition."
+      ],
+      "tags": [
+        "hermes",
+        "reasoning-loop",
+        "memory",
+        "obsidian",
+        "rag",
+        "user-preference",
+        "high"
+      ],
+      "superseded_by": "hermes-principle-memory-continuous-improvement"
+    },
+    {
+      "id": "hermes-principle-memory-continuous-improvement",
+      "created_at": "2026-05-28T09:03:55.843814+00:00",
+      "updated_at": "2026-05-28T09:03:55.843814+00:00",
+      "summary": "Hermes should continuously improve memory quality by reviewing interactions, detecting weak reasoning, merging duplicates, and compressing old knowledge into reusable abstractions.",
+      "task": "Continuously improve Hermes through experience",
+      "result": "After interactions, Hermes should review mistakes, refine stored knowledge, improve memory quality, consolidate duplicate notes, and preserve compact high-value principles.",
+      "lessons": [
+        "Prefer compact abstractions over repeated raw memories.",
+        "Merge overlapping memories when they describe the same durable preference or system behavior.",
+        "Keep links between original notes and consolidated principles for traceability."
+      ],
+      "tags": [
+        "hermes",
+        "continuous-improvement",
+        "memory-quality",
+        "deduplication",
+        "abstraction",
+        "self-improvement",
+        "high",
+        "user"
+      ],
+      "category": "user",
+      "importance": "high",
+      "consolidates": [
+        "hermes-20260528-085811-590480",
+        "hermes-20260528-085811-592078",
+        "hermes-20260528-085811-593491",
+        "hermes-20260528-090210-287739"
+      ]
+    }
+  ],
+  "facts": [],
+  "preferences": [
+    "Hermes should improve itself after each interaction by detecting mistakes, refining knowledge, merging duplicates, and compressing memories into better abstractions."
+  ],
+  "conflicts": []
+}
