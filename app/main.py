@@ -474,15 +474,4 @@ async def stream_agent_steps(payload: AgentStreamRequest, request: Request) -> A
     return await _stream_agent_events(task)
 
 
-def main() -> None:
-    """Run the FastAPI server."""
-    uvicorn.run(
-        app,
-        host=API_HOST,
-        port=API_PORT,
-        log_level=str(LOG_LEVEL).lower(),
-    )
 
-
-if __name__ == "__main__":
-    main()
