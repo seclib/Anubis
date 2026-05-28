@@ -58,11 +58,13 @@ services:
       HERMES_MEMORY_ENABLED: "true"
       HERMES_MEMORY_BACKEND: qdrant
       QDRANT_URL: http://qdrant:6333
+      QDRANT_COLLECTION: hermes_memory
 
       HERMES_MEMORY_FILE: /workspace/state/hermes_memory.json
 
       # 📚 OBSIDIAN
       OBSIDIAN_VAULT_PATH: /obsidian
+      OBSIDIAN_DAILY_MEMORY_DIR: memories
 
       CONTINUOUS_RUN: "true"
       AUTO_GIT_COMMIT_ENABLED: "true"
@@ -74,7 +76,7 @@ services:
       - anubis-workspace:/workspace
 
       # ⚠️ adapte le chemin si besoin
-      - /home/fatsio/ObsidianVault:/obsidian:ro
+      - /home/fatsio/ObsidianVault:/obsidian:rw
 
     working_dir: /workspace
 

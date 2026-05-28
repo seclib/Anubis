@@ -42,8 +42,12 @@ EMBEDDING_TIMEOUT = int(os.getenv("EMBEDDING_TIMEOUT", "20"))
 EMBEDDING_FALLBACK_ENABLED = os.getenv("EMBEDDING_FALLBACK_ENABLED", "true").lower() == "true"
 VECTOR_STORE_FILE = Path(os.getenv("VECTOR_STORE_FILE", "state/vector_store.json"))
 HERMES_MEMORY_ENABLED = os.getenv("HERMES_MEMORY_ENABLED", "true").lower() == "true"
+HERMES_MEMORY_BACKEND = os.getenv("HERMES_MEMORY_BACKEND", "local").lower()
 HERMES_MEMORY_FILE = Path(os.getenv("HERMES_MEMORY_FILE", "state/hermes_memory.json"))
 OBSIDIAN_VAULT_PATH = Path(os.getenv("OBSIDIAN_VAULT_PATH", "state/obsidian_vault"))
+OBSIDIAN_DAILY_MEMORY_DIR = os.getenv("OBSIDIAN_DAILY_MEMORY_DIR", "memories")
+QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
+QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "hermes_memory")
 
 # Agent Configuration
 MAX_STEPS = int(os.getenv("MAX_STEPS", "30"))
@@ -105,8 +109,12 @@ __all__ = [
     "EMBEDDING_FALLBACK_ENABLED",
     "VECTOR_STORE_FILE",
     "HERMES_MEMORY_ENABLED",
+    "HERMES_MEMORY_BACKEND",
     "HERMES_MEMORY_FILE",
     "OBSIDIAN_VAULT_PATH",
+    "OBSIDIAN_DAILY_MEMORY_DIR",
+    "QDRANT_URL",
+    "QDRANT_COLLECTION",
     "MAX_STEPS",
     "MAX_RETRIES",
     "MAX_TOOL_RETRIES",

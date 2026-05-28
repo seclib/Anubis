@@ -2,7 +2,7 @@
   "version": 1,
   "identity": "Hermes",
   "created_at": "2026-05-28T08:58:11.590472+00:00",
-  "updated_at": "2026-05-28T09:05:04.630191+00:00",
+  "updated_at": "2026-05-28T09:47:47.941089+00:00",
   "entries": [
     {
       "id": "hermes-20260528-085811-590480",
@@ -159,6 +159,73 @@
         "self-improvement",
         "high",
         "user-preference"
+      ]
+    },
+    {
+      "id": "hermes-20260528-093534-903381",
+      "created_at": "2026-05-28T09:35:34.903395+00:00",
+      "updated_at": "2026-05-28T09:35:34.903397+00:00",
+      "summary": "The user wants the agent to always search memory before answering and maintain compressed structured long-term knowledge.",
+      "task": "Store persistent memory operating rules",
+      "result": "The agent should use short-term context, vector memory, and Obsidian; search memory before answering; use relevant memory; store important information after interactions; compress memory to avoid redundancy; and prefer structured knowledge over raw chat logs.",
+      "lessons": [
+        "Search memory before responding.",
+        "Use relevant retrieved memories in answers.",
+        "Store durable information and compress redundant memory.",
+        "Prefer structured notes over raw transcripts."
+      ],
+      "tags": [
+        "persistent-memory",
+        "qdrant",
+        "obsidian",
+        "memory-policy",
+        "structured-knowledge",
+        "high",
+        "user-preference"
+      ]
+    },
+    {
+      "id": "hermes-20260528-093718-945639",
+      "created_at": "2026-05-28T09:37:18.945655+00:00",
+      "updated_at": "2026-05-28T09:37:18.945657+00:00",
+      "summary": "Before answering, the agent should retrieve vector and Obsidian memories and inject a merged memory context block into reasoning.",
+      "task": "Store pre-answer memory retrieval rule",
+      "result": "For each user query, search vector memory and Obsidian notes, merge relevant results into a memory context block, use it in the response process, and continue normally if no relevant memory exists.",
+      "lessons": [
+        "Retrieve memory before answering.",
+        "Merge vector and Obsidian results into one context block.",
+        "Use retrieved context when relevant; otherwise proceed normally."
+      ],
+      "tags": [
+        "memory-retrieval",
+        "qdrant",
+        "obsidian",
+        "prompt-context",
+        "hermes",
+        "user-preference",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260528-094747-941066",
+      "created_at": "2026-05-28T09:47:47.941080+00:00",
+      "updated_at": "2026-05-28T09:47:47.941082+00:00",
+      "summary": "After responding, the agent should extract durable facts, store them in vector memory, and append a concise Obsidian daily summary.",
+      "task": "Store post-response memory workflow",
+      "result": "After each response, extract user preferences, technical decisions, goals, and important context; store non-redundant facts in long-term vector memory; write a concise summary to the Obsidian daily memory note; avoid redundant or useless information.",
+      "lessons": [
+        "Extract only durable facts after responding.",
+        "Append concise summaries to the daily Obsidian memory note.",
+        "Avoid redundant or low-value memory entries."
+      ],
+      "tags": [
+        "post-response-memory",
+        "qdrant",
+        "obsidian",
+        "daily-note",
+        "memory-quality",
+        "user-preference",
+        "high"
       ]
     }
   ],

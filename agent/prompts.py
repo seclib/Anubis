@@ -83,6 +83,7 @@ Available tools:
 - index_obsidian_vault: {"force": false}
 - store_hermes_memory: {"summary": "<compact useful memory>", "task": "<optional task>", "result": "<optional result>", "lessons": ["<lesson>"], "tags": ["<tag>"]}
 - write_obsidian_note: {"title": "<note title>", "content": "<markdown content>", "folder": "Hermes"}
+- append_daily_memory_summary: {"entry": {"id": "...", "summary": "..."}, "day": "YYYY-MM-DD"}
 - final: {"result": "<result>"}
 
 IMPORTANT:

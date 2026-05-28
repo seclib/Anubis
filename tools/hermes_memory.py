@@ -5,6 +5,7 @@ from __future__ import annotations
 from typing import Any
 
 from agent.hermes_memory import (
+    append_daily_memory_summary as _append_daily_memory_summary,
     hermes_recall as _hermes_recall,
     index_obsidian_vault as _index_obsidian_vault,
     store_hermes_memory as _store_hermes_memory,
@@ -42,8 +43,13 @@ def write_obsidian_note(title: str, content: str, folder: str = "Hermes") -> dic
     return _write_obsidian_note(title=title, content=content, folder=folder)
 
 
+def append_daily_memory_summary(entry: dict[str, Any], day: str | None = None) -> dict[str, Any]:
+    return _append_daily_memory_summary(entry=entry, day=day)
+
+
 __all__ = [
     "index_obsidian_vault",
+    "append_daily_memory_summary",
     "search_hermes_memory",
     "store_hermes_memory",
     "write_obsidian_note",

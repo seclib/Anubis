@@ -4,12 +4,23 @@ from __future__ import annotations
 
 import json
 import re
+import uuid
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
 
+import requests
+
 from agent import vector_memory
-from config import HERMES_MEMORY_ENABLED, HERMES_MEMORY_FILE, OBSIDIAN_VAULT_PATH
+from config import (
+    HERMES_MEMORY_ENABLED,
+    HERMES_MEMORY_BACKEND,
+    HERMES_MEMORY_FILE,
+    OBSIDIAN_DAILY_MEMORY_DIR,
+    OBSIDIAN_VAULT_PATH,
+    QDRANT_COLLECTION,
+    QDRANT_URL,
+)
 from tools.sandbox import relative_to_workspace, resolve_workspace_path, workspace_root
 
 MAX_NOTE_BYTES = 256_000
@@ -30,10 +41,25 @@ def _memory_path() -> Path:
 
 def obsidian_vault_path(create: bool = True) -> Path:
     path = OBSIDIAN_VAULT_PATH
-    safe_path = resolve_workspace_path(path, must_exist=False)
+    safe_path = (
+        path.expanduser().resolve(strict=False)
+        if path.is_absolute()
+        else resolve_workspace_path(path, must_exist=False)
+    )
     if create:
         safe_path.mkdir(parents=True, exist_ok=True)
     return safe_path
+
+
+def _display_path(path: Path) -> str:
+    try:
+        return relative_to_workspace(path)
+    except Exception:
+        return str(path)
+
+
+def _ensure_inside_vault(path: Path, vault: Path) -> None:
+    path.resolve(strict=False).relative_to(vault.resolve(strict=False))
 
 
 def _default_memory() -> dict[str, Any]:
@@ -125,7 +151,7 @@ def search_obsidian_notes(query: str, top_k: int = 5) -> list[dict[str, Any]]:
         results.append(
             {
                 "score": round(score, 6),
-                "source": relative_to_workspace(path),
+                "source": _display_path(path),
                 "text": text[:MAX_RECALL_TEXT],
                 "updated_at": datetime.fromtimestamp(path.stat().st_mtime, timezone.utc).isoformat(),
             }
@@ -171,6 +197,7 @@ def _append_vector_document(kind: str, source: str, text: str, metadata: dict[st
     documents = [doc for doc in store.get("documents", []) if isinstance(doc, dict)]
     content_hash = vector_memory._content_hash(text)
     doc_id = f"{kind}:{source}:{content_hash[:12]}"
+    embedding = vector_memory._hash_embedding(text)
     documents = [doc for doc in documents if doc.get("id") != doc_id]
     documents.append(
         {
@@ -180,13 +207,58 @@ def _append_vector_document(kind: str, source: str, text: str, metadata: dict[st
             "chunk_index": 0,
             "content_hash": content_hash,
             "text": text,
-            "embedding": vector_memory._hash_embedding(text),
+            "embedding": embedding,
             "metadata": metadata,
             "updated_at": _now_iso(),
         }
     )
     store["documents"] = documents[-5000:]
     vector_memory.save_vector_store(store)
+    _mirror_vector_document_to_qdrant(doc_id, kind, source, text, embedding, metadata)
+
+
+def _mirror_vector_document_to_qdrant(
+    doc_id: str,
+    kind: str,
+    source: str,
+    text: str,
+    embedding: list[float],
+    metadata: dict[str, Any],
+) -> None:
+    if HERMES_MEMORY_BACKEND != "qdrant" or not embedding:
+        return
+
+    base_url = QDRANT_URL.rstrip("/")
+    collection = QDRANT_COLLECTION.strip() or "hermes_memory"
+    vector_size = len(embedding)
+    try:
+        requests.put(
+            f"{base_url}/collections/{collection}",
+            json={"vectors": {"size": vector_size, "distance": "Cosine"}},
+            timeout=3,
+        )
+        requests.put(
+            f"{base_url}/collections/{collection}/points?wait=true",
+            json={
+                "points": [
+                    {
+                        "id": str(uuid.uuid5(uuid.NAMESPACE_URL, doc_id)),
+                        "vector": embedding,
+                        "payload": {
+                            "doc_id": doc_id,
+                            "kind": kind,
+                            "source": source,
+                            "text": text[:MAX_RECALL_TEXT],
+                            "metadata": metadata,
+                            "updated_at": _now_iso(),
+                        },
+                    }
+                ]
+            },
+            timeout=3,
+        )
+    except Exception:
+        return
 
 
 def _local_vector_search(query: str, kinds: set[str], top_k: int) -> list[dict[str, Any]]:
@@ -229,7 +301,7 @@ def index_obsidian_vault(force: bool = False) -> dict[str, Any]:
     reused = 0
     for path in _safe_note_files():
         text = path.read_text(encoding="utf-8", errors="ignore")
-        source = relative_to_workspace(path)
+        source = _display_path(path)
         content_hash = vector_memory._content_hash(text)
         previous = existing.get(source)
         if not force and previous and previous.get("content_hash") == content_hash:
@@ -254,7 +326,7 @@ def index_obsidian_vault(force: bool = False) -> dict[str, Any]:
     vector_memory.save_vector_store(store)
     return {
         "status": "indexed",
-        "vault": relative_to_workspace(obsidian_vault_path(create=True)),
+        "vault": _display_path(obsidian_vault_path(create=True)),
         "indexed": indexed,
         "reused": reused,
         "total_documents": len(documents),
@@ -265,12 +337,65 @@ def write_obsidian_note(title: str, content: str, folder: str = "Hermes") -> dic
     """Write a sandboxed markdown note into the configured Obsidian vault."""
     vault = obsidian_vault_path(create=True)
     safe_folder = _slug(folder)
-    target_dir = resolve_workspace_path(vault / safe_folder, must_exist=False)
+    target_dir = (vault / safe_folder).resolve(strict=False)
+    _ensure_inside_vault(target_dir, vault)
     target_dir.mkdir(parents=True, exist_ok=True)
     filename = f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{_slug(title)}.md"
-    target = resolve_workspace_path(target_dir / filename, must_exist=False)
+    target = (target_dir / filename).resolve(strict=False)
+    _ensure_inside_vault(target, vault)
     target.write_text(content, encoding="utf-8")
-    return {"success": True, "path": relative_to_workspace(target)}
+    return {"success": True, "path": _display_path(target)}
+
+
+def _daily_memory_path(day: str | None = None) -> Path:
+    vault = obsidian_vault_path(create=True)
+    date_text = day or datetime.now(timezone.utc).strftime("%Y-%m-%d")
+    safe_dir = _slug(OBSIDIAN_DAILY_MEMORY_DIR or "memories")
+    target_dir = (vault / safe_dir).resolve(strict=False)
+    _ensure_inside_vault(target_dir, vault)
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target = (target_dir / f"{date_text}.md").resolve(strict=False)
+    _ensure_inside_vault(target, vault)
+    return target
+
+
+def append_daily_memory_summary(entry: dict[str, Any], day: str | None = None) -> dict[str, Any]:
+    """Append a concise durable-memory summary to the daily Obsidian memory note."""
+    if not HERMES_MEMORY_ENABLED:
+        return {"success": True, "status": "disabled"}
+
+    path = _daily_memory_path(day)
+    entry_id = str(entry.get("id") or "")
+    existing = path.read_text(encoding="utf-8") if path.exists() else ""
+    if entry_id and f"<!-- {entry_id} -->" in existing:
+        return {"success": True, "status": "duplicate", "path": _display_path(path)}
+
+    if not existing.strip():
+        date_text = path.stem
+        existing = (
+            f"# Memories - {date_text}\n\n"
+            "Concise long-term memory extracted from interactions.\n\n"
+            "## Entries\n"
+        )
+
+    tags = ", ".join(str(tag) for tag in entry.get("tags", [])[:10])
+    lessons = entry.get("lessons") if isinstance(entry.get("lessons"), list) else []
+    lesson_text = "; ".join(str(lesson) for lesson in lessons[:3])
+    block = (
+        f"\n<!-- {entry_id} -->\n"
+        f"- **{entry.get('summary', 'Memory')}**\n"
+        f"  - Task: {entry.get('task', '')}\n"
+        f"  - Tags: {tags}\n"
+        f"  - Lessons: {lesson_text}\n"
+    )
+    path.write_text(existing.rstrip() + "\n" + block, encoding="utf-8")
+    _append_vector_document(
+        "obsidian_daily_memory",
+        _display_path(path),
+        block,
+        {"entry_id": entry_id, "tags": entry.get("tags", [])},
+    )
+    return {"success": True, "status": "written", "path": _display_path(path)}
 
 
 def store_hermes_memory(
@@ -313,7 +438,8 @@ def store_hermes_memory(
             + "\n"
         )
         note = write_obsidian_note(entry["summary"] or "Hermes memory", note_body, folder="Hermes")
-    return {"success": True, "entry": entry, "note": note}
+    daily_note = append_daily_memory_summary(entry)
+    return {"success": True, "entry": entry, "note": note, "daily_note": daily_note}
 
 
 def remember_interaction(task: str, result: Any, memory: dict[str, Any] | None = None) -> dict[str, Any]:
@@ -347,7 +473,7 @@ def hermes_recall(query: str, top_k: int = 5) -> dict[str, Any]:
     note_matches = search_obsidian_notes(query, top_k=top_k)
     vector_matches = _local_vector_search(
         query,
-        kinds={"hermes_memory", "obsidian_note", "agent_history"},
+        kinds={"hermes_memory", "obsidian_note", "obsidian_daily_memory", "agent_history"},
         top_k=top_k,
     )
 
@@ -388,6 +514,7 @@ __all__ = [
     "index_obsidian_vault",
     "load_hermes_memory",
     "obsidian_vault_path",
+    "append_daily_memory_summary",
     "remember_interaction",
     "save_hermes_memory",
     "search_json_memory",

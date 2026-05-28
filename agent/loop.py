@@ -151,6 +151,7 @@ TOOL_SPECS = {
         "content": "<markdown content>",
         "folder": "Hermes",
     },
+    "append_daily_memory_summary": {"entry": {"id": "...", "summary": "..."}, "day": "YYYY-MM-DD"},
     "final": {"result": "<result>"},
 }
 

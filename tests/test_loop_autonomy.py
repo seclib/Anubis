@@ -388,6 +388,8 @@ class AutonomousLoopTest(unittest.TestCase):
 
         self.assertTrue(stored["success"], stored)
         self.assertTrue(stored["note"]["path"].endswith(".md"))
+        self.assertTrue(stored["daily_note"]["path"].endswith(".md"))
+        self.assertTrue((vault / "memories").exists())
         self.assertIn("Obsidian", recall["context"])
         self.assertTrue(recall["json_matches"])
         self.assertTrue(recall["obsidian_matches"])
@@ -404,6 +406,7 @@ class AutonomousLoopTest(unittest.TestCase):
             "index_obsidian_vault",
             "store_hermes_memory",
             "write_obsidian_note",
+            "append_daily_memory_summary",
         }
         memory = loop._initial_memory("Remember useful project context", use_planner=True)
 
@@ -417,6 +420,41 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertIn("Hermes remembered context", action_prompt)
         self.assertIn("search_hermes_memory", analysis_prompt)
         self.assertTrue(callable(hermes_tools.search_hermes_memory))
+
+    def test_hermes_memory_can_mirror_vectors_to_qdrant(self):
+        memory_file = Path("state") / "test_hermes_qdrant_memory.json"
+        vault = Path("state") / "test_qdrant_obsidian_vault"
+        vector_store = Path("state") / "test_qdrant_vector_store.json"
+        for path in (memory_file, vector_store):
+            if path.exists():
+                path.unlink()
+        if vault.exists():
+            shutil.rmtree(vault)
+
+        with (
+            patch.object(hermes_memory, "HERMES_MEMORY_FILE", memory_file),
+            patch.object(hermes_memory, "OBSIDIAN_VAULT_PATH", vault),
+            patch.object(hermes_memory, "HERMES_MEMORY_BACKEND", "qdrant"),
+            patch.object(hermes_memory, "QDRANT_URL", "http://qdrant:6333"),
+            patch.object(vector_memory, "VECTOR_STORE_FILE", vector_store),
+            patch.object(hermes_memory.requests, "put") as qdrant_put,
+        ):
+            stored = hermes_memory.store_hermes_memory(
+                summary="Mirror durable memory to Qdrant",
+                task="Validate Qdrant mirror",
+                result="Vector payload is sent to Qdrant when configured.",
+                tags=["qdrant", "memory"],
+            )
+
+        self.assertTrue(stored["success"], stored)
+        self.assertGreaterEqual(qdrant_put.call_count, 2)
+        self.assertIn("/collections/hermes_memory", qdrant_put.call_args_list[0].args[0])
+
+        if vault.exists():
+            shutil.rmtree(vault)
+        for path in (memory_file, vector_store):
+            if path.exists():
+                path.unlink()
 
     def test_priority_engine_is_stored_in_orchestration_memory(self):
         memory = loop._initial_memory("Prioritize work", use_planner=True)
@@ -981,6 +1019,7 @@ class AutonomousLoopTest(unittest.TestCase):
             patch.object(loop, "index_agent_history", return_value={"status": "indexed"}),
             patch.object(loop, "_soft_limit_reached", side_effect=fake_soft_limit),
             patch.object(loop, "CONTINUOUS_RUN", False),
+            patch.object(loop, "remember_interaction", return_value={"success": True}),
         ):
             result = loop.run_agent_loop(
                 "Improve autonomy",
@@ -1096,6 +1135,7 @@ class AutonomousLoopTest(unittest.TestCase):
             patch.object(loop, "get_context_summary", return_value="context"),
             patch.object(loop, "_vector_context_text", return_value="vector context"),
             patch.object(loop, "index_agent_history", return_value={"status": "indexed"}),
+            patch.object(loop, "remember_interaction", return_value={"success": True}),
         ):
             result = loop.run_agent_loop(
                 "Exercise self-healing",
@@ -1172,6 +1212,7 @@ class AutonomousLoopTest(unittest.TestCase):
             patch.object(loop, "get_context_summary", return_value="context"),
             patch.object(loop, "_vector_context_text", return_value="vector context"),
             patch.object(loop, "index_agent_history", return_value={"status": "indexed"}),
+            patch.object(loop, "remember_interaction", return_value={"success": True}),
         ):
             result = loop.run_agent_loop("Stream repo tools", progress_callback=events.append)
 

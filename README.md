@@ -119,7 +119,9 @@ Before completion, the agent validates:
 - Searches long-term memory before analysis, action, validation, and correction
 - Stores compact interaction summaries in `state/hermes_memory.json`
 - Mirrors useful memories into markdown notes inside the configured Obsidian vault
+- Appends concise post-interaction summaries to `memories/YYYY-MM-DD.md`
 - Indexes Obsidian notes into vector memory for semantic recall
+- Optionally mirrors Hermes vectors to Qdrant when `HERMES_MEMORY_BACKEND=qdrant`
 - Retrieves JSON memory, Obsidian notes, and vector matches together
 - Prioritizes recent and consistent memories when context overlaps
 
@@ -229,8 +231,12 @@ export PROJECT_ROOT="$(pwd)"           # Workspace root
 export EMBEDDING_MODEL="bge-m3"         # or nomic-embed-text
 export VECTOR_STORE_FILE="state/vector_store.json"
 export HERMES_MEMORY_ENABLED="true"
+export HERMES_MEMORY_BACKEND="local"    # or qdrant
 export HERMES_MEMORY_FILE="state/hermes_memory.json"
 export OBSIDIAN_VAULT_PATH="state/obsidian_vault"
+export OBSIDIAN_DAILY_MEMORY_DIR="memories"
+export QDRANT_URL="http://localhost:6333"
+export QDRANT_COLLECTION="hermes_memory"
 
 # Multi-agent Ollama models
 export ORCHESTRATOR_AGENT_MODEL="$OLLAMA_MODEL"
@@ -373,6 +379,7 @@ Hermes memory tools available to agents:
 - `index_obsidian_vault`: index markdown notes from the configured vault
 - `store_hermes_memory`: persist compact facts, lessons, and outcomes
 - `write_obsidian_note`: write a markdown note into the vault
+- `append_daily_memory_summary`: append concise memory summaries to `memories/YYYY-MM-DD.md`
 
 ### Connecting Open WebUI
 

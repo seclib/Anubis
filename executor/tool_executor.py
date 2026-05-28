@@ -31,6 +31,7 @@ from tools.git_autonomy import (
     run_git_validations,
 )
 from tools.hermes_memory import (
+    append_daily_memory_summary,
     index_obsidian_vault,
     search_hermes_memory,
     store_hermes_memory,
@@ -89,6 +90,7 @@ TOOLS: dict[str, ToolFunction] = {
     "index_obsidian_vault": index_obsidian_vault,
     "store_hermes_memory": store_hermes_memory,
     "write_obsidian_note": write_obsidian_note,
+    "append_daily_memory_summary": append_daily_memory_summary,
 }
 
 
