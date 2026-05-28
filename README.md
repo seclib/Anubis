@@ -1,4 +1,4 @@
-# Anubis Agent - Autonomous Development Agent
+# Anubis - Autonomous Development Agent
 
 A fully autonomous AI development agent that runs locally with **Ollama**, executing tools autonomously through a state machine reasoning loop.
 
@@ -46,11 +46,12 @@ anubis-agent/
 
 ### 2. **Global Agent Rules (GARs)**
 The agent MUST ALWAYS:
-1. **Try a solution** → Propose an action using available tools
-2. **Observe result** → Capture output, success/failure, errors
-3. **Correct if error** → Ask LLM for corrected arguments, retry
-4. **Never abandon immediately** → Exhaust all retries, try alternatives
-5. **Own the outcome** → Responsible for final task success
+1. **Always try to solve the task** → Choose the safest available tool action and execute it
+2. **Never ask for human help** → Do not request confirmation, clarification, or manual intervention
+3. **Observe result** → Capture output, success/failure, errors
+4. **Correct its own errors** → Analyze failures, change arguments, retry, and switch strategy
+5. **Continue until success or total blockage** → Exhaust retries and alternatives before blocking
+6. **Own the outcome** → Responsible for final task success
 
 ### 3. **Automatic Error Recovery**
 - Tool failures trigger LLM correction
@@ -182,6 +183,7 @@ Implemented endpoints:
 - `GET /v1/models`
 - `GET /v1/models/{model_id}`
 - `POST /v1/chat/completions`
+- `POST /v1/agent/stream`
 - `GET /health`
 
 `API_BASE_PATH` can be changed if you want Open WebUI to point at a custom base URL path, for example `/openai/v1`.
@@ -194,21 +196,53 @@ Open WebUI can therefore display live agent progress, including:
 - retry / auto-correction events
 - intermediate verification results
 
+For a Cursor / Claude Code style UI, use the native structured stream:
+
+```bash
+curl -N http://localhost:8000/v1/agent/stream \
+  -H "Content-Type: application/json" \
+  -d '{"task":"Inspect the repository and summarize the entrypoints"}'
+```
+
+This endpoint returns Server-Sent Events:
+- `agent_progress`: state, selected action, tool start/result/error, intermediate result, verification
+- `agent_result`: final agent result
+- `agent_error`: execution error
+- `agent_done`: stream closed cleanly
+
 ### Connecting Open WebUI
 
-In Open WebUI:
+With Docker Compose, Open WebUI is started and preconfigured automatically:
+
+```bash
+docker compose up --build
+```
+
+Open the UI at:
+
+```text
+http://localhost:3000
+```
+
+The bundled Open WebUI service is configured in OpenAI-compatible mode with:
+- Base URL inside Docker: `http://anubis-agent:8000/v1`
+- Browser/host Base URL: `http://localhost:8000/v1`
+- API key: `ignored`
+- Model: `claude-code-local`
+
+If you configure an existing Open WebUI manually:
 
 1. Go to `Admin Settings`
 2. Open `Connections > OpenAI > Manage`
 3. Add a new `Standard / Compatible` connection
 4. Set `API URL` to `http://localhost:8000/v1` or your custom `API_BASE_PATH`
-5. Leave `API Key` empty unless you explicitly enable `API_AUTH_REQUIRED=true`
+5. Set `API Key` to `ignored` unless you explicitly enable `API_AUTH_REQUIRED=true`
 6. Save, then select the model `claude-code-local`
 
 If Open WebUI runs in Docker, use:
 
 ```text
-http://host.docker.internal:8000/v1
+http://anubis-agent:8000/v1
 ```
 
 ## Docker
@@ -224,6 +258,7 @@ The container:
 - uses `/workspace` as the project root
 - reaches Ollama through `http://host.docker.internal:11434`
 - exposes the OpenAI-compatible API on `http://localhost:8000/v1`
+- exposes Open WebUI on `http://localhost:3000`
 - supports Open WebUI streaming via `stream=true`
 - allows changing the API path with `API_BASE_PATH`
 - keeps auth disabled unless `API_AUTH_REQUIRED=true`

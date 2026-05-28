@@ -25,6 +25,12 @@ if str(PROJECT_SOURCE) not in sys.path:
     sys.path.insert(0, str(PROJECT_SOURCE))
 
 from agent.loop import run_agent_loop
+from agent.streaming import (
+    agent_event_payload,
+    format_progress_event,
+    format_sse_event,
+    short_text,
+)
 from config import (
     API_AUTH_REQUIRED,
     API_BASE_PATH,
@@ -45,6 +51,7 @@ _MODEL_DETAIL_PATH = f"{_API_PREFIX}/models/{{model_id}}" if _API_PREFIX else "/
 _CHAT_COMPLETIONS_PATH = (
     f"{_API_PREFIX}/chat/completions" if _API_PREFIX else "/chat/completions"
 )
+_AGENT_STREAM_PATH = f"{_API_PREFIX}/agent/stream" if _API_PREFIX else "/agent/stream"
 _HEALTH_API_PATH = f"{_API_PREFIX}/health" if _API_PREFIX else "/health"
 
 
@@ -61,6 +68,13 @@ class ChatCompletionRequest(BaseModel):
     model: str | None = None
     messages: list[ChatMessage] = Field(default_factory=list)
     stream: bool = False
+
+
+class AgentStreamRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    task: str | None = None
+    messages: list[ChatMessage] = Field(default_factory=list)
 
 
 class ChatCompletionResponseMessage(BaseModel):
@@ -153,45 +167,6 @@ def _extract_latest_user_message(messages: list[ChatMessage]) -> str:
             return content
 
     return fallback
-
-
-def _short_text(value: Any, limit: int = 300) -> str:
-    if isinstance(value, (dict, list)):
-        text = json.dumps(value, ensure_ascii=False, default=str)
-    else:
-        text = str(value)
-    return text[:limit]
-
-
-def _format_progress_event(event: dict[str, Any]) -> str:
-    event_type = str(event.get("type", "progress"))
-    message = str(event.get("message", "")).strip()
-    state = event.get("state")
-    prefix = f"[{event_type.upper()}]"
-    if state:
-        prefix += f" [{state}]"
-
-    details: list[str] = []
-    if event_type in {"tool_start", "tool_result", "tool_error", "tool_correction", "strategy_change"}:
-        if event.get("tool"):
-            details.append(f"tool={event['tool']}")
-        if event.get("attempt"):
-            details.append(f"attempt={event['attempt']}")
-    if event_type in {"plan", "action", "verification"} and event.get("cycle"):
-        details.append(f"cycle={event['cycle']}")
-    if event_type == "intermediate_result" and event.get("result") is not None:
-        details.append(_short_text(event["result"]))
-    if event_type == "verification" and event.get("verification") is not None:
-        details.append(_short_text(event["verification"]))
-    if event_type in {"tool_result", "tool_error"} and event.get("result") is not None:
-        details.append(_short_text(event["result"]))
-    if event_type == "complete" and event.get("final_result") is not None:
-        details.append(_short_text(event["final_result"], 800))
-    if event_type == "blocked" and event.get("reason"):
-        details.append(str(event["reason"]))
-
-    detail_text = f" ({', '.join(details)})" if details else ""
-    return f"{prefix} {message}{detail_text}\n\n"
 
 
 def _result_text(result: Any) -> str:
@@ -313,7 +288,7 @@ async def _stream_chat_completion(
 
                     kind = item.get("kind")
                     if kind == "progress":
-                        text = _format_progress_event(item["event"])
+                        text = format_progress_event(item["event"])
                         yield _chat_completion_chunk(
                             model,
                             text,
@@ -326,7 +301,7 @@ async def _stream_chat_completion(
                             final_payload = str(item["event"].get("final_result", final_payload))
                             final_emitted = True
                         elif item["event"].get("type") == "blocked":
-                            final_payload = _short_text(item["event"].get("final_result", ""), 1200)
+                            final_payload = short_text(item["event"].get("final_result", ""), 1200)
                             final_emitted = True
                     elif kind == "result":
                         result = item["result"]
@@ -361,6 +336,55 @@ async def _stream_chat_completion(
                     include_role=not emitted_role,
                 )
                 yield "data: [DONE]\n\n"
+            finally:
+                worker_thread.join(timeout=1)
+
+    return StreamingResponse(generator(), media_type="text/event-stream")
+
+
+async def _stream_agent_events(task: str) -> Any:
+    event_queue: queue.Queue[Any] = queue.Queue()
+
+    def progress_callback(event: dict[str, Any]) -> None:
+        event_queue.put({"kind": "progress", "event": event})
+
+    def worker() -> None:
+        try:
+            result = run_agent_loop(task, progress_callback=progress_callback)
+            event_queue.put({"kind": "result", "result": result})
+        except Exception as exc:
+            logger.exception("Structured streaming agent execution failed")
+            event_queue.put({"kind": "error", "error": str(exc)})
+        finally:
+            event_queue.put(_STREAM_DONE)
+
+    async def generator():
+        sequence = 0
+        lock = _get_run_lock()
+        async with lock:
+            worker_thread = threading.Thread(target=worker, daemon=True)
+            worker_thread.start()
+
+            try:
+                while True:
+                    item = await asyncio.to_thread(event_queue.get)
+                    if item is _STREAM_DONE:
+                        break
+
+                    sequence += 1
+                    kind = item.get("kind")
+                    if kind == "progress":
+                        payload = agent_event_payload(item["event"], sequence)
+                        yield format_sse_event("agent_progress", payload, event_id=sequence)
+                    elif kind == "result":
+                        payload = {"sequence": sequence, "result": item["result"]}
+                        yield format_sse_event("agent_result", payload, event_id=sequence)
+                    elif kind == "error":
+                        payload = {"sequence": sequence, "error": item["error"]}
+                        yield format_sse_event("agent_error", payload, event_id=sequence)
+
+                sequence += 1
+                yield format_sse_event("agent_done", {"sequence": sequence}, event_id=sequence)
             finally:
                 worker_thread.join(timeout=1)
 
@@ -434,6 +458,20 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request) -> 
 
     content = _result_text(result)
     return _chat_completion_payload(model, content, completion_id, created)
+
+
+@app.post(_AGENT_STREAM_PATH)
+async def stream_agent_steps(payload: AgentStreamRequest, request: Request) -> Any:
+    _check_api_key(request)
+
+    task = (payload.task or "").strip()
+    if not task and payload.messages:
+        task = _extract_latest_user_message(payload.messages)
+    if not task:
+        raise HTTPException(status_code=400, detail="task or messages must contain a request")
+
+    logger.info("Processing structured agent stream")
+    return await _stream_agent_events(task)
 
 
 def main() -> None:

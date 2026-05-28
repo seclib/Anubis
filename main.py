@@ -23,6 +23,7 @@ from config import (
     OLLAMA_MODEL,
 )
 from agent import run_agent_loop, get_task_state_summary, load_memory
+from agent.streaming import format_progress_event
 
 # Configure logging
 logging.basicConfig(
@@ -72,7 +73,10 @@ def main() -> None:
         print(f"   {task}\n")
         logger.info(f"Agent starting with task: {task}")
         
-        result = run_agent_loop(task)
+        def print_progress(event):
+            print(format_progress_event(event), end="", flush=True)
+
+        result = run_agent_loop(task, progress_callback=print_progress)
         memory = load_memory()
         final_status = memory.get("status", "completed")
         

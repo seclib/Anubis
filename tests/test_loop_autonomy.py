@@ -3,9 +3,36 @@ import unittest
 from unittest.mock import patch
 
 from agent import loop
+from agent.prompts import AUTONOMY_RULES, SYSTEM_PROMPT
+from agent.streaming import agent_event_payload, format_progress_event, format_sse_event
 
 
 class AutonomousLoopTest(unittest.TestCase):
+    def test_global_autonomy_contract_is_in_all_llm_prompts(self):
+        memory = loop._initial_memory("Fix the project", use_planner=True)
+        memory["last_result"] = {"success": False, "output": "boom"}
+
+        prompts = [
+            SYSTEM_PROMPT,
+            loop._build_analysis_prompt("Fix the project", memory),
+            loop._build_action_prompt("Fix the project", memory),
+            loop._build_evaluate_success_prompt("Fix the project", memory, memory["last_result"]),
+            loop._build_correction_prompt(
+                task="Fix the project",
+                memory=memory,
+                tool="read_file",
+                args={"path": "missing.md"},
+                error_text="Missing file",
+                retry_number=1,
+                failure_history=[],
+            ),
+        ]
+
+        for prompt in prompts:
+            self.assertIn(AUTONOMY_RULES, prompt)
+            self.assertIn("Never ask for human help", prompt)
+            self.assertIn("You are responsible for the final success", prompt)
+
     def test_loop_reanalyzes_until_completion_without_human_stop(self):
         events = []
         analysis_count = 0
@@ -232,6 +259,90 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertTrue(
             any(event["type"] == "strategy_change" and event.get("state") == loop.STATE_ANALYZE for event in events)
         )
+
+    def test_initial_repo_analysis_streams_each_tool(self):
+        events = []
+
+        def fake_llm(prompt: str) -> str:
+            if "Tu es en phase d'analyse autonome." in prompt:
+                return json.dumps(
+                    {
+                        "summary": "Analyse",
+                        "goal": "Terminer",
+                        "uncertainty": "low",
+                        "key_unknowns": [],
+                        "success_criteria": ["done"],
+                        "recommended_actions": ["final"],
+                        "recommended_focus": "final",
+                        "next_step": "final",
+                    }
+                )
+
+            if "Tu verifies l'avancement d'un agent autonome." in prompt:
+                return json.dumps({"success": True, "reason": "complete"})
+
+            if "Schema de reponse obligatoire" in prompt:
+                return json.dumps(
+                    {
+                        "uncertainty": "low",
+                        "intent": "final",
+                        "tool": "final",
+                        "args": {"result": "done"},
+                        "reason": "Terminé",
+                        "next_action": "",
+                    }
+                )
+
+            raise AssertionError(f"Unexpected prompt: {prompt[:200]}")
+
+        with (
+            patch.object(loop, "call_llm", side_effect=fake_llm),
+            patch.object(loop, "load_memory", return_value={}),
+            patch.object(loop, "save_memory", lambda memory: None),
+            patch.object(loop, "append_event", lambda memory, event: None),
+            patch.object(loop, "plan_steps", return_value=[]),
+            patch.object(loop, "execute_tool", return_value={"success": True, "output": ["ok"]}),
+            patch.object(loop, "get_context_summary", return_value="context"),
+        ):
+            result = loop.run_agent_loop("Stream repo tools", progress_callback=events.append)
+
+        self.assertEqual(result, "done")
+        repo_tools = {"detect_project_type", "scan_repo_tree", "find_entrypoints"}
+        started = {
+            event.get("tool")
+            for event in events
+            if event["type"] == "tool_start" and event.get("tool") in repo_tools
+        }
+        finished = {
+            event.get("tool")
+            for event in events
+            if event["type"] == "tool_result" and event.get("tool") in repo_tools
+        }
+        self.assertEqual(started, repo_tools)
+        self.assertEqual(finished, repo_tools)
+
+    def test_structured_stream_payload_contains_tool_result_and_progress(self):
+        event = {
+            "type": "tool_result",
+            "message": "Tool `read_file` succeeded",
+            "state": loop.STATE_EXECUTE,
+            "tool": "read_file",
+            "step": 2,
+            "cycle": 1,
+            "result": {"success": True, "output": "hello"},
+        }
+
+        payload = agent_event_payload(event, sequence=7)
+        text = format_progress_event(event)
+        sse = format_sse_event("agent_progress", payload, event_id=7)
+
+        self.assertEqual(payload["sequence"], 7)
+        self.assertEqual(payload["progress"]["state"], loop.STATE_EXECUTE)
+        self.assertIn("hello", payload["result_summary"])
+        self.assertIn("[TOOL_RESULT]", text)
+        self.assertIn("tool=read_file", text)
+        self.assertIn("event: agent_progress", sse)
+        self.assertIn('"sequence": 7', sse)
 
 
 if __name__ == "__main__":

@@ -13,6 +13,12 @@ from typing import Any
 from urllib.parse import urlparse
 
 from agent.loop import run_agent_loop
+from agent.streaming import (
+    agent_event_payload,
+    format_progress_event,
+    format_sse_event,
+    short_text,
+)
 from config import API_HOST, API_KEY, API_MODEL_ID, API_MODEL_NAME, API_PORT
 
 logger = logging.getLogger(__name__)
@@ -75,46 +81,6 @@ def _messages_to_task(messages: list[dict[str, Any]]) -> str:
 
 def _json_bytes(payload: dict[str, Any]) -> bytes:
     return json.dumps(payload, ensure_ascii=False).encode("utf-8")
-
-
-def _short_text(value: Any, limit: int = 300) -> str:
-    if isinstance(value, (dict, list)):
-        text = json.dumps(value, ensure_ascii=False, default=str)
-    else:
-        text = str(value)
-    return text[:limit]
-
-
-def _format_progress_event(event: dict[str, Any]) -> str:
-    event_type = str(event.get("type", "progress"))
-    message = str(event.get("message", "")).strip()
-    state = event.get("state")
-    prefix = f"[{event_type.upper()}]"
-    if state:
-        prefix += f" [{state}]"
-
-    details: list[str] = []
-    if event_type in {"tool_start", "tool_result", "tool_error", "tool_correction", "strategy_change"}:
-        if event.get("tool"):
-            details.append(f"tool={event['tool']}")
-        if event.get("attempt"):
-            details.append(f"attempt={event['attempt']}")
-    if event_type in {"plan", "action", "verification"}:
-        if event.get("cycle"):
-            details.append(f"cycle={event['cycle']}")
-    if event_type == "intermediate_result" and event.get("result") is not None:
-        details.append(_short_text(event["result"]))
-    if event_type == "verification" and event.get("verification") is not None:
-        details.append(_short_text(event["verification"]))
-    if event_type in {"tool_result", "tool_error"} and event.get("result") is not None:
-        details.append(_short_text(event["result"]))
-    if event_type == "complete" and event.get("final_result") is not None:
-        details.append(_short_text(event["final_result"], 800))
-    if event_type == "blocked" and event.get("reason"):
-        details.append(str(event["reason"]))
-
-    detail_text = f" ({', '.join(details)})" if details else ""
-    return f"{prefix} {message}{detail_text}\n\n"
 
 
 def _unauthorized(handler: BaseHTTPRequestHandler) -> None:
@@ -266,14 +232,14 @@ class OpenAICompatibleHandler(BaseHTTPRequestHandler):
 
                 kind = item.get("kind")
                 if kind == "progress":
-                    text = _format_progress_event(item["event"])
+                    text = format_progress_event(item["event"])
                     emit_chunk(text, include_role=not emitted_role)
                     emitted_role = True
                     if item["event"].get("type") == "complete":
                         final_payload = str(item["event"].get("final_result", final_payload))
                         final_emitted = True
                     elif item["event"].get("type") == "blocked":
-                        final_payload = _short_text(item["event"].get("final_result", ""), 1200)
+                        final_payload = short_text(item["event"].get("final_result", ""), 1200)
                         final_emitted = True
                 elif kind == "result":
                     result = item["result"]
@@ -295,6 +261,65 @@ class OpenAICompatibleHandler(BaseHTTPRequestHandler):
 
             emit_chunk("", finish_reason="stop", include_role=not emitted_role)
             self.wfile.write(b"data: [DONE]\n\n")
+            self.wfile.flush()
+        finally:
+            worker_thread.join(timeout=1)
+
+    def _send_agent_event_stream(self, task: str) -> None:
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream; charset=utf-8")
+        self.send_header("Cache-Control", "no-cache")
+        self.send_header("Connection", "close")
+        self.send_header("Access-Control-Allow-Origin", "*")
+        self.send_header("Access-Control-Allow-Headers", "Authorization, Content-Type")
+        self.send_header("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
+        self.end_headers()
+        event_queue: queue.Queue[Any] = queue.Queue()
+
+        def progress_callback(event: dict[str, Any]) -> None:
+            event_queue.put({"kind": "progress", "event": event})
+
+        def worker() -> None:
+            try:
+                result = run_agent_loop(task, progress_callback=progress_callback)
+                event_queue.put({"kind": "result", "result": result})
+            except Exception as exc:
+                logger.exception("Structured streaming agent execution failed")
+                event_queue.put({"kind": "error", "error": str(exc)})
+            finally:
+                event_queue.put(_STREAM_DONE)
+
+        worker_thread = threading.Thread(target=worker, daemon=True)
+        worker_thread.start()
+        sequence = 0
+
+        try:
+            while True:
+                item = event_queue.get()
+                if item is _STREAM_DONE:
+                    break
+
+                sequence += 1
+                kind = item.get("kind")
+                if kind == "progress":
+                    payload = agent_event_payload(item["event"], sequence)
+                    event_text = format_sse_event("agent_progress", payload, event_id=sequence)
+                elif kind == "result":
+                    payload = {"sequence": sequence, "result": item["result"]}
+                    event_text = format_sse_event("agent_result", payload, event_id=sequence)
+                elif kind == "error":
+                    payload = {"sequence": sequence, "error": item["error"]}
+                    event_text = format_sse_event("agent_error", payload, event_id=sequence)
+                else:
+                    continue
+
+                self.wfile.write(event_text.encode("utf-8"))
+                self.wfile.flush()
+
+            sequence += 1
+            self.wfile.write(
+                format_sse_event("agent_done", {"sequence": sequence}, event_id=sequence).encode("utf-8")
+            )
             self.wfile.flush()
         finally:
             worker_thread.join(timeout=1)
@@ -338,7 +363,7 @@ class OpenAICompatibleHandler(BaseHTTPRequestHandler):
 
     def do_POST(self) -> None:
         path = urlparse(self.path).path
-        if path != "/v1/chat/completions":
+        if path not in {"/v1/chat/completions", "/v1/agent/stream"}:
             self._send_json(404, {"error": {"message": f"Unknown endpoint: {path}"}})
             return
 
@@ -348,6 +373,17 @@ class OpenAICompatibleHandler(BaseHTTPRequestHandler):
         payload = self._read_json_body()
         if payload is None:
             self._send_json(400, {"error": {"message": "Invalid JSON body"}})
+            return
+
+        if path == "/v1/agent/stream":
+            task = str(payload.get("task") or "").strip()
+            messages = payload.get("messages", [])
+            if not task and isinstance(messages, list) and messages:
+                task = _messages_to_task(messages)
+            if not task:
+                self._send_json(400, {"error": {"message": "task or messages must contain a request"}})
+                return
+            self._send_agent_event_stream(task)
             return
 
         messages = payload.get("messages", [])

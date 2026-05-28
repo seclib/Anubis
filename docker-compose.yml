@@ -38,3 +38,25 @@ services:
       - host.docker.internal:host-gateway
     ports:
       - "8000:8000"
+
+  open-webui:
+    image: ghcr.io/open-webui/open-webui:main
+    container_name: anubis-open-webui
+    restart: unless-stopped
+    depends_on:
+      - anubis-agent
+    environment:
+      WEBUI_NAME: Claude Code Local
+      ENABLE_OPENAI_API: "true"
+      ENABLE_OLLAMA_API: "false"
+      OPENAI_API_BASE_URL: http://anubis-agent:8000/v1
+      OPENAI_API_BASE_URLS: http://anubis-agent:8000/v1
+      OPENAI_API_KEY: ignored
+      OPENAI_API_KEYS: ignored
+    volumes:
+      - open-webui-data:/app/backend/data
+    ports:
+      - "3000:8080"
+
+volumes:
+  open-webui-data:

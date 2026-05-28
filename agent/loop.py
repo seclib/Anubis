@@ -10,7 +10,8 @@ from typing import Any, Callable
 from agent.memory import append_event, get_context_summary, load_memory, save_memory
 from agent.parser import parse_action
 from agent.planner import plan_steps
-from agent.prompts import SYSTEM_PROMPT
+from agent.prompts import AUTONOMY_RULES, SYSTEM_PROMPT
+from agent.streaming import short_text
 from config import CONTINUOUS_RUN, MAX_RETRIES, MAX_STEPS as CONFIG_MAX_STEPS, MAX_TOOL_RETRIES
 from executor.tool_executor import execute_tool
 from llm.ollama import call_llm
@@ -58,11 +59,7 @@ def _tool_specs_text() -> str:
 
 
 def _short(value: Any, limit: int = 1200) -> str:
-    if isinstance(value, (dict, list)):
-        text = json.dumps(value, ensure_ascii=False, default=str)
-    else:
-        text = str(value)
-    return text[:limit]
+    return short_text(value, limit)
 
 
 def _coerce_bool(value: Any, default: bool = False) -> bool:
@@ -407,6 +404,18 @@ def _refresh_repo_analysis(
     )
 
     for tool_name, tool_args in checks:
+        _emit_progress(
+            progress_callback,
+            "tool_start",
+            f"Running repository analysis tool `{tool_name}`",
+            tool=tool_name,
+            args=tool_args,
+            attempt=1,
+            max_attempts=1,
+            state=memory.get("state"),
+            step=memory.get("total_steps"),
+            cycle=memory.get("cycle"),
+        )
         result = execute_tool(tool_name, tool_args)
         snapshot["checks"].append(
             {
@@ -429,6 +438,19 @@ def _refresh_repo_analysis(
                 "self_healing": not initial_analysis,
                 "analysis_type": analysis_type,
             },
+        )
+        _emit_progress(
+            progress_callback,
+            "tool_result" if result.get("success") else "tool_error",
+            f"Repository analysis tool `{tool_name}` "
+            f"{'succeeded' if result.get('success') else 'failed'}",
+            tool=tool_name,
+            args=tool_args,
+            result=result,
+            attempt=1,
+            state=memory.get("state"),
+            step=memory.get("total_steps"),
+            cycle=memory.get("cycle"),
         )
 
     architecture_context = _build_architecture_context(snapshot)
@@ -520,6 +542,9 @@ def _build_analysis_prompt(task: str, memory: dict[str, Any]) -> str:
 Tu es en phase d'analyse autonome.
 Analyse la tâche, le dépôt et le contexte courant avant d'agir.
 
+Contrat d'autonomie global:
+{AUTONOMY_RULES}
+
 Task utilisateur:
 {task}
 
@@ -592,6 +617,12 @@ Mode autonome:
 - L'agent ne doit jamais abandonner.
 - Si une tentative echoue, il doit corriger puis reessayer.
 - N'utilise JAMAIS un tool hors de cette liste.
+- Ne demande jamais d'aide humaine, de confirmation ou de clarification.
+- Continue jusqu'au succes verifie ou jusqu'au blocage total prouve.
+- L'agent est responsable de la reussite finale.
+
+Contrat d'autonomie global:
+{AUTONOMY_RULES}
 
 Task utilisateur:
 {task}
@@ -665,6 +696,9 @@ def _build_evaluate_success_prompt(
 ) -> str:
     return f"""Tu verifies l'avancement d'un agent autonome.
 
+Contrat d'autonomie global:
+{AUTONOMY_RULES}
+
 Task utilisateur:
 {task}
 
@@ -701,6 +735,8 @@ Question:
 Regles:
 - "success" vaut true seulement si la tache utilisateur est vraiment terminee.
 - Si la tache n'est pas terminee, renvoie "success": false avec une raison concise.
+- Ne demande jamais une intervention humaine. Si ce n'est pas termine, indique pourquoi continuer.
+- Le blocage total doit etre reserve aux cas ou les retries et strategies alternatives sont epuises.
 - JSON uniquement.
 """
 
@@ -762,6 +798,9 @@ def _build_correction_prompt(
 
 Tu fais du self-healing de tool pour un agent autonome.
 
+Contrat d'autonomie global:
+{AUTONOMY_RULES}
+
 Task utilisateur:
 {task}
 
@@ -794,6 +833,7 @@ Workflow obligatoire:
 2. Genere une correction concrete des arguments.
 3. Demande retry=true uniquement si le meme tool peut etre retente de facon utile.
 4. Ne change pas de tool ici. Si tu ne peux pas corriger de facon fiable, renvoie retry=false.
+5. Ne demande jamais d'aide humaine; transforme l'erreur en prochaine action autonome.
 
 Reponds uniquement en JSON:
 {{
