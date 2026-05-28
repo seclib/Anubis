@@ -115,13 +115,21 @@ Before completion, the agent validates:
 - Uses Ollama embeddings with `bge-m3` by default; `nomic-embed-text` is also supported
 - Stores vectors locally in `state/vector_store.json`
 
-### 8. **Project Introspection**
+### 8. **Hermes Long-Term Memory**
+- Searches long-term memory before analysis, action, validation, and correction
+- Stores compact interaction summaries in `state/hermes_memory.json`
+- Mirrors useful memories into markdown notes inside the configured Obsidian vault
+- Indexes Obsidian notes into vector memory for semantic recall
+- Retrieves JSON memory, Obsidian notes, and vector matches together
+- Prioritizes recent and consistent memories when context overlaps
+
+### 9. **Project Introspection**
 Automatic detection of:
 - Project type (Node, Python, Docker, Go, Rust, Java)
 - Framework (React, Vue, Django, Flask, FastAPI, etc.)
 - Entry points (main files, scripts, Dockerfile)
 
-### 9. **Autonomous Git System**
+### 10. **Autonomous Git System**
 - Runs validation commands before creating commits
 - Creates an automatic commit after successful task verification
 - Generates a deterministic commit message from the task and changed files
@@ -129,7 +137,7 @@ Automatic detection of:
 - Records commit history locally and can rollback the last autonomous commit
 - Aborts commits when validation fails to avoid committing broken work
 
-### 10. **Docker Sandbox Hardening**
+### 11. **Docker Sandbox Hardening**
 - Runs as a non-root user with all Linux capabilities dropped
 - Uses a read-only container root filesystem plus small `noexec` tmpfs mounts
 - Keeps `/workspace` in an isolated Docker volume by default, not a host bind mount
@@ -137,7 +145,7 @@ Automatic detection of:
 - Writes a persistent tool audit log to `state/tool_audit.log`
 - Applies process, CPU, memory, and file-descriptor limits in Docker Compose
 
-### 11. **Dynamic Tool Creation**
+### 12. **Dynamic Tool Creation**
 - If a capability is missing, the agent can generate a new Python tool
 - Generated tools are saved under `tools/generated/`
 - Tools are validated with a restricted AST policy before being loaded
@@ -145,7 +153,7 @@ Automatic detection of:
 - Dynamic tools can be listed and reused in later agent steps
 - Unsafe imports and calls such as `subprocess`, `os`, `eval`, and `open` are rejected
 
-### 12. **Continuous Improvement Mode**
+### 13. **Continuous Improvement Mode**
 - Analyzes tool success rate, failed tools, no-progress cycles, and recurrent errors
 - Stores self-improvement state in runtime memory
 - Injects strategy improvements into analysis, action, review, and correction prompts
@@ -153,7 +161,7 @@ Automatic detection of:
 - Emits live `self_improvement` progress events during autonomous runs
 - Optimizes future behavior without changing code unless a normal tool/action does it explicitly
 
-### 13. **Autonomous Developer Mode**
+### 14. **Autonomous Developer Mode**
 - Detects the active project workflow and chooses install, build, test, and server commands
 - Can create a minimal Python or FastAPI project scaffold inside the workspace
 - Installs dependencies with sandbox-validated commands when a dependency file exists
@@ -220,6 +228,9 @@ export LLM_MAX_TOKENS="2000"
 export PROJECT_ROOT="$(pwd)"           # Workspace root
 export EMBEDDING_MODEL="bge-m3"         # or nomic-embed-text
 export VECTOR_STORE_FILE="state/vector_store.json"
+export HERMES_MEMORY_ENABLED="true"
+export HERMES_MEMORY_FILE="state/hermes_memory.json"
+export OBSIDIAN_VAULT_PATH="state/obsidian_vault"
 
 # Multi-agent Ollama models
 export ORCHESTRATOR_AGENT_MODEL="$OLLAMA_MODEL"
@@ -356,6 +367,12 @@ Autonomous developer tools available to agents:
 - `run_project_tests`: run tests and return structured errors
 - `start_project_server`: launch a tracked server process
 - `stop_project_server`: stop a tracked server process
+
+Hermes memory tools available to agents:
+- `search_hermes_memory`: retrieve JSON memory, Obsidian notes, and vector matches
+- `index_obsidian_vault`: index markdown notes from the configured vault
+- `store_hermes_memory`: persist compact facts, lessons, and outcomes
+- `write_obsidian_note`: write a markdown note into the vault
 
 ### Connecting Open WebUI
 

@@ -41,6 +41,9 @@ EMBEDDING_MODEL = os.getenv("EMBEDDING_MODEL", "bge-m3")
 EMBEDDING_TIMEOUT = int(os.getenv("EMBEDDING_TIMEOUT", "20"))
 EMBEDDING_FALLBACK_ENABLED = os.getenv("EMBEDDING_FALLBACK_ENABLED", "true").lower() == "true"
 VECTOR_STORE_FILE = Path(os.getenv("VECTOR_STORE_FILE", "state/vector_store.json"))
+HERMES_MEMORY_ENABLED = os.getenv("HERMES_MEMORY_ENABLED", "true").lower() == "true"
+HERMES_MEMORY_FILE = Path(os.getenv("HERMES_MEMORY_FILE", "state/hermes_memory.json"))
+OBSIDIAN_VAULT_PATH = Path(os.getenv("OBSIDIAN_VAULT_PATH", "state/obsidian_vault"))
 
 # Agent Configuration
 MAX_STEPS = int(os.getenv("MAX_STEPS", "30"))
@@ -101,6 +104,9 @@ __all__ = [
     "EMBEDDING_TIMEOUT",
     "EMBEDDING_FALLBACK_ENABLED",
     "VECTOR_STORE_FILE",
+    "HERMES_MEMORY_ENABLED",
+    "HERMES_MEMORY_FILE",
+    "OBSIDIAN_VAULT_PATH",
     "MAX_STEPS",
     "MAX_RETRIES",
     "MAX_TOOL_RETRIES",

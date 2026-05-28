@@ -19,6 +19,7 @@ from agent.debugger_agent import (
     create_debugger_state,
     normalize_debugger_report,
 )
+from agent.hermes_memory import hermes_context_text, remember_interaction
 from agent.memory import append_event, get_context_summary, load_memory, save_memory
 from agent.multi_agent import (
     CODER_AGENT,
@@ -135,6 +136,21 @@ TOOL_SPECS = {
         "wait_seconds": 1,
     },
     "stop_project_server": {"name": "<server name>"},
+    "search_hermes_memory": {"query": "<semantic memory query>", "top_k": 5},
+    "index_obsidian_vault": {"force": False},
+    "store_hermes_memory": {
+        "summary": "<compact useful memory>",
+        "task": "<optional task>",
+        "result": "<optional result>",
+        "lessons": ["<lesson>"],
+        "tags": ["<tag>"],
+        "write_note": True,
+    },
+    "write_obsidian_note": {
+        "title": "<note title>",
+        "content": "<markdown content>",
+        "folder": "Hermes",
+    },
     "final": {"result": "<result>"},
 }
 
@@ -310,6 +326,8 @@ def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
         "last_tool_analysis": None,
         "last_repo_analysis": None,
         "last_git_commit": None,
+        "hermes_context": "",
+        "last_hermes_memory": None,
         "self_improvement": {
             "performance": {},
             "strategy_improvements": [],
@@ -388,6 +406,14 @@ def _stop_for_total_blockage(
         reason=reason,
         final_result=memory["final_result"],
     )
+    try:
+        memory["last_hermes_memory"] = remember_interaction(
+            str(memory.get("task") or ""),
+            memory["final_result"],
+            memory,
+        )
+    except Exception as exc:
+        logger.debug("Hermes memory store failed after blockage: %s", exc)
     save_memory(memory)
     return memory["final_result"]
 
@@ -517,6 +543,14 @@ def _vector_context_text(query: str) -> str:
     except Exception as exc:
         logger.debug("Vector context retrieval failed: %s", exc)
         return "Vector context unavailable."
+
+
+def _hermes_context_text(query: str) -> str:
+    try:
+        return hermes_context_text(query)
+    except Exception as exc:
+        logger.debug("Hermes context retrieval failed: %s", exc)
+        return "Hermes memory unavailable."
 
 
 def _self_improvement_text(memory: dict[str, Any]) -> str:
@@ -844,6 +878,7 @@ def _build_analysis_prompt(task: str, memory: dict[str, Any]) -> str:
     context = get_context_summary(memory)
     orchestrator_context = build_orchestrator_context(memory)
     vector_context = _vector_context_text(task)
+    hermes_context = memory.get("hermes_context") or _hermes_context_text(task)
     return f"""{SYSTEM_PROMPT}
 
 Tu es en phase d'analyse autonome.
@@ -867,6 +902,9 @@ Contexte orchestrateur:
 
 Contexte vectoriel pertinent:
 {vector_context}
+
+Memoire Hermes long terme:
+{hermes_context}
 
 Amelioration continue:
 {_self_improvement_text(memory)}
@@ -936,6 +974,7 @@ def _build_action_prompt(task: str, memory: dict[str, Any]) -> str:
             ]
         )
     )
+    hermes_context = memory.get("hermes_context") or _hermes_context_text(task)
     if state == STATE_FIX and strategy_change_required:
         state_instruction = (
             "La tentative precedente a echoue meme apres auto-correction. "
@@ -974,6 +1013,9 @@ Contexte repository initial:
 
 Contexte vectoriel pertinent:
 {vector_context}
+
+Memoire Hermes long terme:
+{hermes_context}
 
 Contexte collaboration multi-agent:
 {_collaboration_text(memory)}
@@ -1045,6 +1087,7 @@ def _build_evaluate_success_prompt(
     vector_context = _vector_context_text(
         f"{task}\n{_short(last_result, 600)}\n{_short(memory.get('last_validation_report'), 600)}"
     )
+    hermes_context = memory.get("hermes_context") or _hermes_context_text(task)
     return f"""Tu verifies l'avancement d'un agent autonome.
 
 Contrat d'autonomie global:
@@ -1076,6 +1119,9 @@ Amelioration continue:
 
 Contexte vectoriel pertinent:
 {vector_context}
+
+Memoire Hermes long terme:
+{hermes_context}
 
 Contexte reviewer_agent:
 {build_reviewer_context(memory)}
@@ -1188,6 +1234,7 @@ def _build_correction_prompt(
 ) -> str:
     max_retries = MAX_SELF_HEALING_RETRIES
     vector_context = _vector_context_text(f"{task}\n{tool}\n{error_text}\n{_short(args, 600)}")
+    hermes_context = memory.get("hermes_context") or _hermes_context_text(task)
     return f"""{SYSTEM_PROMPT}
 
 Tu fais du self-healing de tool pour un agent autonome.
@@ -1221,6 +1268,9 @@ Amelioration continue:
 
 Contexte vectoriel pertinent:
 {vector_context}
+
+Memoire Hermes long terme:
+{hermes_context}
 
 Contexte debugger_agent:
 {build_debugger_context(memory)}
@@ -1717,6 +1767,14 @@ def run_agent_loop(
                 state=STATE_INIT,
                 result=vector_result,
             )
+            memory["hermes_context"] = _hermes_context_text(task)
+            _emit_progress(
+                progress_callback,
+                "hermes_recall",
+                "Hermes long-term memory searched",
+                state=STATE_INIT,
+                result=memory["hermes_context"],
+            )
             _refresh_repo_analysis(
                 memory,
                 reason="Initial repository analysis",
@@ -2041,6 +2099,17 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
                     state=STATE_COMPLETE,
                     final_result=final_output,
                 )
+                try:
+                    memory["last_hermes_memory"] = remember_interaction(task, final_output, memory)
+                    _emit_progress(
+                        progress_callback,
+                        "hermes_memory",
+                        "Useful interaction summarized into Hermes memory",
+                        state=STATE_COMPLETE,
+                        result=memory["last_hermes_memory"],
+                    )
+                except Exception as exc:
+                    logger.debug("Hermes memory store failed after completion: %s", exc)
                 save_memory(memory)
                 continue
 

@@ -47,6 +47,8 @@ def _default_memory() -> dict[str, Any]:
         "last_debugger_report": None,
         "last_review_report": None,
         "last_git_commit": None,
+        "hermes_context": "",
+        "last_hermes_memory": None,
         "collaboration_summary": "",
         "self_improvement": {
             "performance": {},

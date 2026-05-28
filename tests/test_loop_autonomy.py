@@ -6,6 +6,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agent import loop
+from agent import hermes_memory
 from agent import vector_memory
 from agent.communication import (
     communication_context,
@@ -23,6 +24,7 @@ from executor import tool_executor
 from tools import autonomous_developer
 from tools import git_autonomy
 from tools import dynamic_tools
+from tools import hermes_memory as hermes_tools
 from tools.sandbox import SandboxViolation, audit_tool_action, validate_command
 from tools.terminal import run_command
 from agent.coder_agent import (
@@ -359,6 +361,62 @@ class AutonomousLoopTest(unittest.TestCase):
 
         self.assertTrue(expected_tools.issubset(tool_executor.TOOLS))
         self.assertTrue(expected_tools.issubset(loop.TOOL_SPECS))
+
+    def test_hermes_memory_stores_obsidian_note_and_recalls_context(self):
+        memory_file = Path("state") / "test_hermes_memory.json"
+        vault = Path("state") / "test_obsidian_vault"
+        vector_store = Path("state") / "test_hermes_vector_store.json"
+        for path in (memory_file, vector_store):
+            if path.exists():
+                path.unlink()
+        if vault.exists():
+            shutil.rmtree(vault)
+
+        with (
+            patch.object(hermes_memory, "HERMES_MEMORY_FILE", memory_file),
+            patch.object(hermes_memory, "OBSIDIAN_VAULT_PATH", vault),
+            patch.object(vector_memory, "VECTOR_STORE_FILE", vector_store),
+        ):
+            stored = hermes_memory.store_hermes_memory(
+                summary="Remember Obsidian vault setup",
+                task="Configure Hermes",
+                result="Hermes stores memories in Obsidian notes",
+                lessons=["Search memory before acting"],
+                tags=["hermes", "obsidian"],
+            )
+            recall = hermes_memory.hermes_recall("Obsidian Hermes memory", top_k=3)
+
+        self.assertTrue(stored["success"], stored)
+        self.assertTrue(stored["note"]["path"].endswith(".md"))
+        self.assertIn("Obsidian", recall["context"])
+        self.assertTrue(recall["json_matches"])
+        self.assertTrue(recall["obsidian_matches"])
+
+        if vault.exists():
+            shutil.rmtree(vault)
+        for path in (memory_file, vector_store):
+            if path.exists():
+                path.unlink()
+
+    def test_hermes_tools_are_registered_and_prompts_use_memory(self):
+        expected_tools = {
+            "search_hermes_memory",
+            "index_obsidian_vault",
+            "store_hermes_memory",
+            "write_obsidian_note",
+        }
+        memory = loop._initial_memory("Remember useful project context", use_planner=True)
+
+        with patch.object(loop, "_hermes_context_text", return_value="Hermes remembered context"):
+            analysis_prompt = loop._build_analysis_prompt("Remember useful project context", memory)
+            action_prompt = loop._build_action_prompt("Remember useful project context", memory)
+
+        self.assertTrue(expected_tools.issubset(tool_executor.TOOLS))
+        self.assertTrue(expected_tools.issubset(loop.TOOL_SPECS))
+        self.assertIn("Hermes remembered context", analysis_prompt)
+        self.assertIn("Hermes remembered context", action_prompt)
+        self.assertIn("search_hermes_memory", analysis_prompt)
+        self.assertTrue(callable(hermes_tools.search_hermes_memory))
 
     def test_priority_engine_is_stored_in_orchestration_memory(self):
         memory = loop._initial_memory("Prioritize work", use_planner=True)

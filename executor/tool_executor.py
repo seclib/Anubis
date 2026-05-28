@@ -30,6 +30,12 @@ from tools.git_autonomy import (
     rollback_last_autonomous_commit,
     run_git_validations,
 )
+from tools.hermes_memory import (
+    index_obsidian_vault,
+    search_hermes_memory,
+    store_hermes_memory,
+    write_obsidian_note,
+)
 from tools.repo import (
     detect_project_type,
     find_entrypoints,
@@ -79,6 +85,10 @@ TOOLS: dict[str, ToolFunction] = {
     "run_project_tests": run_project_tests,
     "start_project_server": start_project_server,
     "stop_project_server": stop_project_server,
+    "search_hermes_memory": search_hermes_memory,
+    "index_obsidian_vault": index_obsidian_vault,
+    "store_hermes_memory": store_hermes_memory,
+    "write_obsidian_note": write_obsidian_note,
 }
 
 

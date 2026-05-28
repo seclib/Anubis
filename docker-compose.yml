@@ -1,4 +1,24 @@
 services:
+
+  # =========================
+  # 🧠 OLLAMA (LOCAL LLM)
+  # =========================
+  ollama:
+    image: ollama/ollama:latest
+    container_name: ollama
+    restart: unless-stopped
+    ports:
+      - "11434:11434"
+    volumes:
+      - ollama_data:/root/.ollama
+    environment:
+      - OLLAMA_HOST=0.0.0.0
+    networks:
+      - anubis-net
+
+  # =========================
+  # 🤖 ANUBIS AGENT
+  # =========================
   anubis-agent:
     build:
       context: .
@@ -9,88 +29,91 @@ services:
     container_name: anubis-agent
     restart: unless-stopped
     init: true
+
     user: "${UID:-1000}:${GID:-1000}"
-    privileged: false
+
     pids_limit: ${ANUBIS_PIDS_LIMIT:-256}
     mem_limit: ${ANUBIS_MEMORY_LIMIT:-2g}
     cpus: ${ANUBIS_CPUS:-2}
-    oom_kill_disable: false
-    ulimits:
-      nofile:
-        soft: 1024
-        hard: 2048
-      nproc: 256
+
     environment:
       API_HOST: 0.0.0.0
       API_PORT: 8000
-      API_BASE_PATH: ${API_BASE_PATH:-/v1}
-      API_AUTH_REQUIRED: "false"
+      API_BASE_PATH: /v1
+
       CONTINUOUS_RUN: "true"
-      AUTO_GIT_COMMIT_ENABLED: ${AUTO_GIT_COMMIT_ENABLED:-true}
-      GIT_USE_TEMP_BRANCH: ${GIT_USE_TEMP_BRANCH:-false}
-      GIT_TEMP_BRANCH_PREFIX: ${GIT_TEMP_BRANCH_PREFIX:-anubis/auto}
-      GIT_VALIDATION_COMMANDS: ${GIT_VALIDATION_COMMANDS:-python3 -m unittest discover -s tests}
-      LOG_LEVEL: INFO
-      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
-      OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}
-      EMBEDDING_MODEL: ${EMBEDDING_MODEL:-bge-m3}
-      VECTOR_STORE_FILE: ${VECTOR_STORE_FILE:-state/vector_store.json}
-      ORCHESTRATOR_AGENT_MODEL: ${ORCHESTRATOR_AGENT_MODEL:-${OLLAMA_MODEL:-mistral}}
-      PLANNER_AGENT_MODEL: ${PLANNER_AGENT_MODEL:-${OLLAMA_MODEL:-mistral}}
-      CODER_AGENT_MODEL: ${CODER_AGENT_MODEL:-deepseek-coder-v2}
-      REVIEWER_AGENT_MODEL: ${REVIEWER_AGENT_MODEL:-${OLLAMA_MODEL:-mistral}}
-      TESTER_AGENT_MODEL: ${TESTER_AGENT_MODEL:-${OLLAMA_MODEL:-mistral}}
-      DEBUGGER_AGENT_MODEL: ${DEBUGGER_AGENT_MODEL:-${OLLAMA_MODEL:-mistral}}
-      MEMORY_AGENT_MODEL: ${MEMORY_AGENT_MODEL:-${OLLAMA_MODEL:-mistral}}
+      AUTO_GIT_COMMIT_ENABLED: "true"
+
+      # 👉 IMPORTANT FIX
+      OLLAMA_BASE_URL: http://ollama:11434
+
+      OLLAMA_MODEL: mistral
+      EMBEDDING_MODEL: bge-m3
+      HERMES_MEMORY_ENABLED: "true"
+      HERMES_MEMORY_FILE: state/hermes_memory.json
+      OBSIDIAN_VAULT_PATH: state/obsidian_vault
+
       PROJECT_ROOT: /workspace
       WORKSPACE_ROOT: /workspace
-      WORKSPACE_DIR: /workspace
-      INIT_WORKSPACE_GIT: ${INIT_WORKSPACE_GIT:-true}
-      TOOL_COMMAND_TIMEOUT: ${TOOL_COMMAND_TIMEOUT:-120}
-      TOOL_COMMAND_MAX_LENGTH: ${TOOL_COMMAND_MAX_LENGTH:-4000}
-      TOOL_OUTPUT_MAX_CHARS: ${TOOL_OUTPUT_MAX_CHARS:-20000}
-      TOOL_AUDIT_FILE: ${TOOL_AUDIT_FILE:-state/tool_audit.log}
-      PYTHONDONTWRITEBYTECODE: "1"
-      PYTHONUNBUFFERED: "1"
+
     volumes:
-      - type: volume
-        source: anubis-workspace
-        target: /workspace
-        volume:
-          nocopy: true
+      - anubis-workspace:/workspace
+
     working_dir: /workspace
-    read_only: true
-    tmpfs:
-      - /tmp:rw,noexec,nosuid,nodev,size=64m
-      - /run:rw,noexec,nosuid,nodev,size=16m
-    cap_drop:
-      - ALL
-    security_opt:
-      - no-new-privileges:true
-    extra_hosts:
-      - host.docker.internal:host-gateway
+
     ports:
       - "8000:8000"
 
+    depends_on:
+      - ollama
+
+    networks:
+      - anubis-net
+
+  # =========================
+  # 🌐 OPEN WEBUI
+  # =========================
   open-webui:
     image: ghcr.io/open-webui/open-webui:main
     container_name: anubis-open-webui
     restart: unless-stopped
+
     depends_on:
+      - ollama
       - anubis-agent
-    environment:
-      WEBUI_NAME: Claude Code Local
-      ENABLE_OPENAI_API: "true"
-      ENABLE_OLLAMA_API: "false"
-      OPENAI_API_BASE_URL: http://anubis-agent:8000/v1
-      OPENAI_API_BASE_URLS: http://anubis-agent:8000/v1
-      OPENAI_API_KEY: ignored
-      OPENAI_API_KEYS: ignored
-    volumes:
-      - open-webui-data:/app/backend/data
+
     ports:
       - "3000:8080"
 
+    volumes:
+      - open-webui-data:/app/backend/data
+
+    environment:
+      WEBUI_NAME: Anubis AI Stack
+
+      # 👉 ACTIVE OLLAMA
+      ENABLE_OLLAMA_API: "true"
+      OLLAMA_BASE_URL: http://ollama:11434
+
+      # 👉 Agent comme tool API
+      ENABLE_OPENAI_API: "true"
+      OPENAI_API_BASE_URL: http://anubis-agent:8000/v1
+      OPENAI_API_KEY: ignored
+
+    networks:
+      - anubis-net
+
+# =========================
+# 📦 VOLUMES
+# =========================
 volumes:
+  ollama_data:
   anubis-workspace:
   open-webui-data:
+
+# =========================
+# 🌐 NETWORK
+# =========================
+networks:
+  anubis-net:
+    driver: bridge
