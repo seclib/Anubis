@@ -26,10 +26,12 @@ def _default_memory() -> dict[str, Any]:
         "steps": [],
         "orchestration": {},
         "coder_agent": {},
+        "tester_agent": {},
         "agent_messages": [],
         "last_action": None,
         "last_result": None,
         "last_agent": None,
+        "last_validation_report": None,
         "collaboration_summary": "",
         "final_result": None,
     }

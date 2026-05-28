@@ -6,6 +6,7 @@ from dataclasses import dataclass
 from typing import Any
 
 from agent.coder_agent import CODER_PROMPT
+from agent.tester_agent import TESTER_PROMPT
 from config import (
     CODER_AGENT_MODEL,
     DEBUGGER_AGENT_MODEL,
@@ -79,12 +80,12 @@ AGENT_SPECS: dict[str, AgentSpec] = {
     ),
     TESTER_AGENT: AgentSpec(
         name=TESTER_AGENT,
-        role="Decide and interpret verification steps, tests, builds, and command results.",
-        model=TESTER_AGENT_MODEL,
-        prompt=(
-            "You are the tester_agent. Validate behavior through available evidence and recommend concrete "
-            "verification actions when needed."
+        role=(
+            "Validation specialist: execute tests, run validation commands, detect runtime errors, "
+            "verify results, and return structured validation reports."
         ),
+        model=TESTER_AGENT_MODEL,
+        prompt=TESTER_PROMPT,
     ),
     DEBUGGER_AGENT: AgentSpec(
         name=DEBUGGER_AGENT,

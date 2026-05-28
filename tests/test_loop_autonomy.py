@@ -19,6 +19,14 @@ from agent.orchestrator_agent import (
 )
 from agent.prompts import AUTONOMY_RULES, SYSTEM_PROMPT
 from agent.streaming import agent_event_payload, format_progress_event, format_sse_event
+from agent.tester_agent import (
+    TESTER_PROMPT,
+    TESTER_REPORT_SCHEMA,
+    TESTER_RESPONSIBILITIES,
+    TESTER_RULES,
+    build_tester_context,
+    normalize_validation_report,
+)
 
 
 class AutonomousLoopTest(unittest.TestCase):
@@ -29,7 +37,23 @@ class AutonomousLoopTest(unittest.TestCase):
             if agent_name == loop.MEMORY_AGENT:
                 return "collaboration summary"
             if agent_name == loop.TESTER_AGENT:
-                return json.dumps({"success": False, "reason": "tester evidence recorded"})
+                return json.dumps(
+                    {
+                        "success": False,
+                        "status": "failed",
+                        "summary": "tester evidence recorded",
+                        "commands": ["python3 -m unittest"],
+                        "errors": [
+                            {
+                                "type": "runtime",
+                                "message": "boom",
+                                "command": "python3 -m unittest",
+                                "evidence": "Traceback",
+                            }
+                        ],
+                        "next_action": "fix",
+                    }
+                )
             return fake_llm(prompt)
 
         return call_agent
@@ -122,6 +146,37 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertIn("avoid unnecessary changes", CODER_RULES)
         self.assertEqual(coder["prompt"], CODER_PROMPT)
         self.assertIn(RECOMMENDED_CODER_MODEL, build_coder_context(memory))
+
+    def test_tester_agent_contract_returns_structured_validation_report(self):
+        memory = loop._initial_memory("Validate feature", use_planner=True)
+        roster = {agent["name"]: agent for agent in memory["agents"]}
+        tester = roster[loop.TESTER_AGENT]
+
+        self.assertEqual(memory["tester_agent"]["responsibilities"], TESTER_RESPONSIBILITIES)
+        self.assertIn("execute_tests", TESTER_RESPONSIBILITIES)
+        self.assertIn("run_validation_commands", TESTER_RESPONSIBILITIES)
+        self.assertIn("detect_runtime_errors", TESTER_RESPONSIBILITIES)
+        self.assertIn("verify_results", TESTER_RESPONSIBILITIES)
+        self.assertIn("analyze shell outputs", TESTER_RULES)
+        self.assertIn("return structured errors", TESTER_RULES)
+        self.assertIn("generate validation reports", TESTER_RULES)
+        self.assertEqual(tester["prompt"], TESTER_PROMPT)
+        self.assertIn("Validation report schema", build_tester_context(memory))
+
+        report = normalize_validation_report(
+            {
+                "success": False,
+                "status": "failed",
+                "summary": "runtime failure",
+                "commands": "python app.py",
+                "errors": "RuntimeError",
+                "next_action": "fix",
+            }
+        )
+        self.assertEqual(report["status"], "failed")
+        self.assertEqual(report["commands"], ["python app.py"])
+        self.assertEqual(report["errors"][0]["type"], "unknown")
+        self.assertEqual(TESTER_REPORT_SCHEMA["success"], "boolean")
 
     def test_loop_reanalyzes_until_completion_without_human_stop(self):
         events = []

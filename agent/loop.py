@@ -35,6 +35,11 @@ from agent.parser import parse_action
 from agent.planner import plan_steps
 from agent.prompts import AUTONOMY_RULES, SYSTEM_PROMPT
 from agent.streaming import short_text
+from agent.tester_agent import (
+    build_tester_context,
+    create_tester_state,
+    normalize_validation_report,
+)
 from config import CONTINUOUS_RUN, MAX_RETRIES, MAX_STEPS as CONFIG_MAX_STEPS, MAX_TOOL_RETRIES
 from executor.tool_executor import execute_tool
 
@@ -206,6 +211,8 @@ def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
         "agents": agent_roster(),
         "orchestration": create_orchestrator_state(task),
         "coder_agent": create_coder_state(),
+        "tester_agent": create_tester_state(),
+        "last_validation_report": None,
         "agent_messages": [],
         "last_agent": None,
         "collaboration_summary": "",
@@ -867,6 +874,9 @@ Dernier resultat:
 Contexte recent:
 {get_context_summary(memory)}
 
+Contexte tester_agent:
+{build_tester_context(memory)}
+
 Contexte repository initial:
 {_repo_context_text(memory)}
 
@@ -928,6 +938,8 @@ def evaluate_success(
     )
     raw_output = reviewer_output
     memory["last_tester_output"] = tester_output
+    tester_report = normalize_validation_report(parse_action(tester_output))
+    memory["last_validation_report"] = tester_report
     memory["last_evaluate_output"] = raw_output
     parsed = parse_action(raw_output)
     if isinstance(parsed, dict) and "success" in parsed:

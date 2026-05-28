@@ -66,7 +66,7 @@ Anubis runs a collaborative team of specialized agents:
 - `planner_agent`: decomposes work into concrete execution steps
 - `coder_agent`: modifies code, creates files, refactors, and implements features with minimal clean changes; recommended model `deepseek-coder-v2`
 - `reviewer_agent`: reviews correctness and completion
-- `tester_agent`: validates behavior through tests and evidence
+- `tester_agent`: executes tests, runs validation commands, detects runtime errors, analyzes shell output, and returns structured validation reports
 - `debugger_agent`: diagnoses failures and proposes corrected tool calls
 - `memory_agent`: summarizes collaboration and keeps shared context compact
 
