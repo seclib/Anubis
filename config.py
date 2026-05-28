@@ -5,6 +5,18 @@ Configuration Module - Central configuration for the Anubis Agent
 import os
 from pathlib import Path
 
+
+def _normalize_api_base_path(value: str | None, default: str = "/v1") -> str:
+    raw_value = (value or default).strip()
+    if not raw_value or raw_value == "/":
+        return ""
+
+    if not raw_value.startswith("/"):
+        raw_value = f"/{raw_value}"
+
+    return raw_value.rstrip("/")
+
+
 # Project root
 PROJECT_ROOT = Path(
     os.getenv("PROJECT_ROOT", str(Path(__file__).parent.absolute()))
@@ -25,9 +37,11 @@ CONTINUOUS_RUN = os.getenv("CONTINUOUS_RUN", "true").lower() == "true"
 # OpenAI-compatible API
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
 API_PORT = int(os.getenv("API_PORT", "8000"))
+API_BASE_PATH = _normalize_api_base_path(os.getenv("API_BASE_PATH", "/v1"))
 API_MODEL_ID = os.getenv("API_MODEL_ID", "claude-code-local")
 API_MODEL_NAME = os.getenv("API_MODEL_NAME", "Claude Code Local Agent")
 API_KEY = os.getenv("API_KEY", "")
+API_AUTH_REQUIRED = os.getenv("API_AUTH_REQUIRED", "false").lower() == "true"
 
 # State and Memory
 STATE_DIR = PROJECT_ROOT / "state"
@@ -52,9 +66,11 @@ __all__ = [
     "CONTINUOUS_RUN",
     "API_HOST",
     "API_PORT",
+    "API_BASE_PATH",
     "API_MODEL_ID",
     "API_MODEL_NAME",
     "API_KEY",
+    "API_AUTH_REQUIRED",
     "STATE_DIR",
     "MEMORY_FILE",
     "LOG_LEVEL",

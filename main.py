@@ -13,6 +13,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 
 from app.main import main as run_fastapi_server
 from config import (
+    API_BASE_PATH,
     API_HOST,
     API_PORT,
     LOG_LEVEL,
@@ -47,7 +48,8 @@ def main() -> None:
     
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "serve":
-            print(f"🌐 Starting FastAPI API on http://{API_HOST}:{API_PORT}/v1\n")
+            api_url = f"http://{API_HOST}:{API_PORT}{API_BASE_PATH or ''}"
+            print(f"🌐 Starting FastAPI API on {api_url}\n")
             logger.info("Starting FastAPI API server")
             run_fastapi_server()
             return

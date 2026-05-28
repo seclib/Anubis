@@ -16,8 +16,8 @@ from typing import Any
 import uvicorn
 from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import JSONResponse, StreamingResponse
-from pydantic import BaseModel, Field
+from fastapi.responses import StreamingResponse
+from pydantic import BaseModel, ConfigDict, Field
 from starlette.concurrency import run_in_threadpool
 
 PROJECT_SOURCE = Path(__file__).resolve().parent.parent
@@ -25,22 +25,81 @@ if str(PROJECT_SOURCE) not in sys.path:
     sys.path.insert(0, str(PROJECT_SOURCE))
 
 from agent.loop import run_agent_loop
-from config import API_HOST, API_KEY, API_MODEL_ID, API_MODEL_NAME, API_PORT, LOG_LEVEL
+from config import (
+    API_AUTH_REQUIRED,
+    API_BASE_PATH,
+    API_HOST,
+    API_KEY,
+    API_MODEL_ID,
+    API_MODEL_NAME,
+    API_PORT,
+    LOG_LEVEL,
+)
 
 logger = logging.getLogger(__name__)
 
 _STREAM_DONE = object()
+_API_PREFIX = API_BASE_PATH
+_MODELS_PATH = f"{_API_PREFIX}/models" if _API_PREFIX else "/models"
+_MODEL_DETAIL_PATH = f"{_API_PREFIX}/models/{{model_id}}" if _API_PREFIX else "/models/{model_id}"
+_CHAT_COMPLETIONS_PATH = (
+    f"{_API_PREFIX}/chat/completions" if _API_PREFIX else "/chat/completions"
+)
+_HEALTH_API_PATH = f"{_API_PREFIX}/health" if _API_PREFIX else "/health"
 
 
 class ChatMessage(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     role: str = "user"
     content: Any = ""
 
 
 class ChatCompletionRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
     model: str | None = None
     messages: list[ChatMessage] = Field(default_factory=list)
     stream: bool = False
+
+
+class ChatCompletionResponseMessage(BaseModel):
+    role: str = "assistant"
+    content: str = ""
+
+
+class ChatCompletionChoice(BaseModel):
+    index: int = 0
+    message: ChatCompletionResponseMessage
+    finish_reason: str = "stop"
+
+
+class ChatCompletionUsage(BaseModel):
+    prompt_tokens: int = 0
+    completion_tokens: int = 0
+    total_tokens: int = 0
+
+
+class ChatCompletionResponse(BaseModel):
+    id: str
+    object: str = "chat.completion"
+    created: int
+    model: str
+    choices: list[ChatCompletionChoice]
+    usage: ChatCompletionUsage
+
+
+class ModelInfo(BaseModel):
+    id: str
+    object: str = "model"
+    created: int
+    owned_by: str = "anubis-agent"
+    name: str = ""
+
+
+class ModelListResponse(BaseModel):
+    object: str = "list"
+    data: list[ModelInfo]
 
 
 app = FastAPI(title="Anubis Agent API", version="1.0.0")
@@ -156,28 +215,22 @@ def _chat_completion_payload(
     content: str,
     completion_id: str,
     created: int,
-) -> dict[str, Any]:
-    return {
-        "id": completion_id,
-        "object": "chat.completion",
-        "created": created,
-        "model": model,
-        "choices": [
-            {
-                "index": 0,
-                "message": {
-                    "role": "assistant",
-                    "content": content,
-                },
-                "finish_reason": "stop",
-            }
+) -> ChatCompletionResponse:
+    return ChatCompletionResponse(
+        id=completion_id,
+        created=created,
+        model=model,
+        choices=[
+            ChatCompletionChoice(
+                message=ChatCompletionResponseMessage(
+                    role="assistant",
+                    content=content,
+                ),
+                finish_reason="stop",
+            )
         ],
-        "usage": {
-            "prompt_tokens": 0,
-            "completion_tokens": 0,
-            "total_tokens": 0,
-        },
-    }
+        usage=ChatCompletionUsage(),
+    )
 
 
 def _chat_completion_chunk(
@@ -212,7 +265,7 @@ def _chat_completion_chunk(
 
 
 def _check_api_key(request: Request) -> None:
-    if not API_KEY:
+    if not API_AUTH_REQUIRED or not API_KEY:
         return
 
     auth_header = request.headers.get("authorization", "")
@@ -319,26 +372,43 @@ async def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
-@app.get("/v1/models")
-async def list_models(request: Request) -> dict[str, Any]:
+if _HEALTH_API_PATH != "/health":
+    app.add_api_route(_HEALTH_API_PATH, health, methods=["GET"])
+
+
+@app.get(_MODELS_PATH, response_model=ModelListResponse)
+async def list_models(request: Request) -> ModelListResponse:
     _check_api_key(request)
 
     now = int(time.time())
-    return {
-        "object": "list",
-        "data": [
-            {
-                "id": API_MODEL_ID,
-                "object": "model",
-                "created": now,
-                "owned_by": "anubis-agent",
-                "name": API_MODEL_NAME,
-            }
-        ],
-    }
+    return ModelListResponse(
+        data=[
+            ModelInfo(
+                id=API_MODEL_ID,
+                created=now,
+                owned_by="anubis-agent",
+                name=API_MODEL_NAME,
+            )
+        ]
+    )
 
 
-@app.post("/v1/chat/completions")
+@app.get(_MODEL_DETAIL_PATH, response_model=ModelInfo)
+async def get_model(model_id: str, request: Request) -> ModelInfo:
+    _check_api_key(request)
+
+    if model_id != API_MODEL_ID:
+        raise HTTPException(status_code=404, detail=f"Unknown model: {model_id}")
+
+    return ModelInfo(
+        id=API_MODEL_ID,
+        created=int(time.time()),
+        owned_by="anubis-agent",
+        name=API_MODEL_NAME,
+    )
+
+
+@app.post(_CHAT_COMPLETIONS_PATH, response_model=ChatCompletionResponse)
 async def chat_completions(payload: ChatCompletionRequest, request: Request) -> Any:
     _check_api_key(request)
 
@@ -363,9 +433,7 @@ async def chat_completions(payload: ChatCompletionRequest, request: Request) -> 
         result = await run_in_threadpool(run_agent_loop, task)
 
     content = _result_text(result)
-    return JSONResponse(
-        content=_chat_completion_payload(model, content, completion_id, created),
-    )
+    return _chat_completion_payload(model, content, completion_id, created)
 
 
 def main() -> None:

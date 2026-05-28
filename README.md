@@ -143,6 +143,8 @@ export CONTINUOUS_RUN="true"          # Always run without interruption
 # OpenAI-compatible API
 export API_HOST="127.0.0.1"
 export API_PORT="8000"
+export API_BASE_PATH="/v1"
+export API_AUTH_REQUIRED="false"
 export API_MODEL_ID="claude-code-local"
 export API_MODEL_NAME="Claude Code Local Agent"
 export API_KEY=""                     # Optional
@@ -178,8 +180,12 @@ http://localhost:8000/v1
 
 Implemented endpoints:
 - `GET /v1/models`
+- `GET /v1/models/{model_id}`
 - `POST /v1/chat/completions`
 - `GET /health`
+
+`API_BASE_PATH` can be changed if you want Open WebUI to point at a custom base URL path, for example `/openai/v1`.
+`API_AUTH_REQUIRED` defaults to `false`, so Open WebUI can connect without any API key.
 
 Streaming is supported on `POST /v1/chat/completions` with `stream=true`.
 Open WebUI can therefore display live agent progress, including:
@@ -195,8 +201,8 @@ In Open WebUI:
 1. Go to `Admin Settings`
 2. Open `Connections > OpenAI > Manage`
 3. Add a new `Standard / Compatible` connection
-4. Set `API URL` to `http://localhost:8000/v1`
-5. Set `API Key` to `none` or leave it empty if `API_KEY` is not configured
+4. Set `API URL` to `http://localhost:8000/v1` or your custom `API_BASE_PATH`
+5. Leave `API Key` empty unless you explicitly enable `API_AUTH_REQUIRED=true`
 6. Save, then select the model `claude-code-local`
 
 If Open WebUI runs in Docker, use:
@@ -219,6 +225,8 @@ The container:
 - reaches Ollama through `http://host.docker.internal:11434`
 - exposes the OpenAI-compatible API on `http://localhost:8000/v1`
 - supports Open WebUI streaming via `stream=true`
+- allows changing the API path with `API_BASE_PATH`
+- keeps auth disabled unless `API_AUTH_REQUIRED=true`
 
 If your local UID/GID is not `1000`, export `UID` and `GID` before building so the workspace mount stays writable.
 
