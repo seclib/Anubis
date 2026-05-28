@@ -24,6 +24,8 @@ def _default_memory() -> dict[str, Any]:
         },
         "task": None,
         "steps": [],
+        "orchestration": {},
+        "coder_agent": {},
         "agent_messages": [],
         "last_action": None,
         "last_result": None,

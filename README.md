@@ -62,9 +62,9 @@ The agent MUST ALWAYS:
 ### 4. **Autonomous Multi-Agent System**
 Anubis runs a collaborative team of specialized agents:
 
-- `orchestrator_agent`: coordinates the task and global strategy
+- `orchestrator_agent`: main brain; receives the user task, distributes work, coordinates steps, aggregates results, and manages retries/priorities
 - `planner_agent`: decomposes work into concrete execution steps
-- `coder_agent`: selects tools and implements changes
+- `coder_agent`: modifies code, creates files, refactors, and implements features with minimal clean changes; recommended model `deepseek-coder-v2`
 - `reviewer_agent`: reviews correctness and completion
 - `tester_agent`: validates behavior through tests and evidence
 - `debugger_agent`: diagnoses failures and proposes corrected tool calls
@@ -158,7 +158,7 @@ export PROJECT_ROOT="$(pwd)"           # Workspace root
 # Multi-agent Ollama models
 export ORCHESTRATOR_AGENT_MODEL="$OLLAMA_MODEL"
 export PLANNER_AGENT_MODEL="$OLLAMA_MODEL"
-export CODER_AGENT_MODEL="qwen2.5-coder"
+export CODER_AGENT_MODEL="deepseek-coder-v2"
 export REVIEWER_AGENT_MODEL="$OLLAMA_MODEL"
 export TESTER_AGENT_MODEL="$OLLAMA_MODEL"
 export DEBUGGER_AGENT_MODEL="qwen2.5-coder"

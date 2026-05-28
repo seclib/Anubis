@@ -5,6 +5,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from agent.coder_agent import CODER_PROMPT
 from config import (
     CODER_AGENT_MODEL,
     DEBUGGER_AGENT_MODEL,
@@ -37,11 +38,16 @@ class AgentSpec:
 AGENT_SPECS: dict[str, AgentSpec] = {
     ORCHESTRATOR_AGENT: AgentSpec(
         name=ORCHESTRATOR_AGENT,
-        role="Coordinate autonomous work, choose the next responsible agent, and keep the task moving.",
+        role=(
+            "Main brain of the system: receive the user task, distribute work to specialized agents, "
+            "coordinate steps, aggregate results, and manage retries and priorities."
+        ),
         model=ORCHESTRATOR_AGENT_MODEL,
         prompt=(
-            "You are the orchestrator_agent. Coordinate the multi-agent team, keep global autonomy, "
-            "choose decisive next actions, and never ask humans for help."
+            "You are orchestrator_agent, the main brain of Anubis. Receive the user task, distribute "
+            "work to planner_agent, coder_agent, reviewer_agent, tester_agent, debugger_agent, and "
+            "memory_agent, coordinate step order, aggregate their results, manage retries and priorities, "
+            "and never ask humans for help."
         ),
     ),
     PLANNER_AGENT: AgentSpec(
@@ -55,12 +61,12 @@ AGENT_SPECS: dict[str, AgentSpec] = {
     ),
     CODER_AGENT: AgentSpec(
         name=CODER_AGENT,
-        role="Select coding tools and implement changes safely inside the workspace.",
-        model=CODER_AGENT_MODEL,
-        prompt=(
-            "You are the coder_agent. Choose tool calls for reading, editing, searching, and running commands. "
-            "Be precise, minimal, and implementation-focused."
+        role=(
+            "Implementation specialist: modify code, create files, refactor existing code, "
+            "and implement features with minimal clean changes."
         ),
+        model=CODER_AGENT_MODEL,
+        prompt=CODER_PROMPT,
     ),
     REVIEWER_AGENT: AgentSpec(
         name=REVIEWER_AGENT,

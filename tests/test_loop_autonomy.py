@@ -3,6 +3,20 @@ import unittest
 from unittest.mock import patch
 
 from agent import loop
+from agent.coder_agent import (
+    CODER_PROMPT,
+    CODER_RESPONSIBILITIES,
+    CODER_RULES,
+    RECOMMENDED_CODER_MODEL,
+    build_coder_context,
+)
+from agent.orchestrator_agent import (
+    ORCHESTRATOR_RESPONSIBILITIES,
+    aggregate_results,
+    priority_for_phase,
+    record_assignment,
+    record_result,
+)
 from agent.prompts import AUTONOMY_RULES, SYSTEM_PROMPT
 from agent.streaming import agent_event_payload, format_progress_event, format_sse_event
 
@@ -64,6 +78,50 @@ class AutonomousLoopTest(unittest.TestCase):
             self.assertTrue(agent["role"])
             self.assertTrue(agent["model"])
             self.assertTrue(agent["prompt"])
+
+    def test_orchestrator_agent_owns_distribution_priorities_and_aggregation(self):
+        memory = loop._initial_memory("Ship feature", use_planner=True)
+        orchestration = memory["orchestration"]
+
+        self.assertEqual(orchestration["agent"], loop.ORCHESTRATOR_AGENT)
+        self.assertEqual(orchestration["responsibilities"], ORCHESTRATOR_RESPONSIBILITIES)
+        self.assertGreater(priority_for_phase("debug"), priority_for_phase("memory_summary"))
+
+        assignment = record_assignment(
+            memory,
+            target_agent=loop.CODER_AGENT,
+            phase="action",
+            reason="implement next step",
+        )
+        record_result(
+            memory,
+            agent_name=loop.CODER_AGENT,
+            phase="action",
+            result="implemented",
+            success=True,
+        )
+
+        self.assertEqual(assignment["from"], loop.ORCHESTRATOR_AGENT)
+        self.assertEqual(assignment["to"], loop.CODER_AGENT)
+        self.assertEqual(memory["orchestration"]["current_assignment"], assignment)
+        self.assertIn("coder_agent [action] success=True", aggregate_results(memory))
+
+    def test_coder_agent_contract_uses_recommended_model_and_minimal_rules(self):
+        memory = loop._initial_memory("Implement feature", use_planner=True)
+        roster = {agent["name"]: agent for agent in memory["agents"]}
+        coder = roster[loop.CODER_AGENT]
+
+        self.assertEqual(coder["model"], RECOMMENDED_CODER_MODEL)
+        self.assertEqual(memory["coder_agent"]["responsibilities"], CODER_RESPONSIBILITIES)
+        self.assertIn("modify_code", CODER_RESPONSIBILITIES)
+        self.assertIn("create_files", CODER_RESPONSIBILITIES)
+        self.assertIn("refactor_existing_code", CODER_RESPONSIBILITIES)
+        self.assertIn("implement_features", CODER_RESPONSIBILITIES)
+        self.assertIn("produce minimal clean code", CODER_RULES)
+        self.assertIn("respect the existing architecture", CODER_RULES)
+        self.assertIn("avoid unnecessary changes", CODER_RULES)
+        self.assertEqual(coder["prompt"], CODER_PROMPT)
+        self.assertIn(RECOMMENDED_CODER_MODEL, build_coder_context(memory))
 
     def test_loop_reanalyzes_until_completion_without_human_stop(self):
         events = []

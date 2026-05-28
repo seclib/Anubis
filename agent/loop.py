@@ -7,6 +7,7 @@ import logging
 from datetime import datetime, timezone
 from typing import Any, Callable
 
+from agent.coder_agent import build_coder_context, create_coder_state
 from agent.memory import append_event, get_context_summary, load_memory, save_memory
 from agent.multi_agent import (
     CODER_AGENT,
@@ -20,6 +21,15 @@ from agent.multi_agent import (
     append_agent_message,
     call_agent,
     collaboration_context,
+)
+from agent.orchestrator_agent import (
+    build_orchestrator_context,
+    create_orchestrator_state,
+    ensure_orchestrator_state,
+    record_assignment,
+    record_result,
+    record_retry,
+    select_agent_for_phase,
 )
 from agent.parser import parse_action
 from agent.planner import plan_steps
@@ -194,6 +204,8 @@ def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
         "pending_final": None,
         "repo_context": None,
         "agents": agent_roster(),
+        "orchestration": create_orchestrator_state(task),
+        "coder_agent": create_coder_state(),
         "agent_messages": [],
         "last_agent": None,
         "collaboration_summary": "",
@@ -392,6 +404,7 @@ def _repo_context_text(memory: dict[str, Any]) -> str:
 def _collaboration_text(memory: dict[str, Any]) -> str:
     payload = {
         "active_agents": memory.get("agents", agent_roster()),
+        "orchestrator": build_orchestrator_context(memory),
         "collaboration_summary": memory.get("collaboration_summary", ""),
         "recent_agent_messages": collaboration_context(memory),
     }
@@ -445,7 +458,37 @@ def _call_agent(
         cycle=memory.get("cycle"),
         step=memory.get("total_steps"),
     )
+    expected_agent = select_agent_for_phase(phase)
+    assignment = record_assignment(
+        memory,
+        target_agent=agent_name,
+        phase=phase,
+        reason=(
+            f"orchestrator_agent delegated {phase} to {agent_name}"
+            if agent_name == expected_agent
+            else f"orchestrator_agent delegated {phase} to {agent_name}; expected {expected_agent}"
+        ),
+    )
+    _emit_progress(
+        progress_callback,
+        "orchestrator_assignment",
+        f"orchestrator_agent assigned {phase} to {agent_name}",
+        agent=ORCHESTRATOR_AGENT,
+        target_agent=agent_name,
+        phase=phase,
+        assignment=assignment,
+        state=memory.get("state"),
+        cycle=memory.get("cycle"),
+        step=memory.get("total_steps"),
+    )
     output = call_agent(agent_name, task_prompt, collaboration_context(memory))
+    record_result(
+        memory,
+        agent_name=agent_name,
+        phase=phase,
+        result=_short(output),
+        success=not str(output).startswith("[LLM ERROR]"),
+    )
     _record_agent_message(
         memory,
         agent_name,
@@ -620,10 +663,12 @@ def _fallback_analysis(task: str, memory: dict[str, Any]) -> dict[str, Any]:
 
 def _build_analysis_prompt(task: str, memory: dict[str, Any]) -> str:
     context = get_context_summary(memory)
+    orchestrator_context = build_orchestrator_context(memory)
     return f"""{SYSTEM_PROMPT}
 
 Tu es en phase d'analyse autonome.
 Analyse la tâche, le dépôt et le contexte courant avant d'agir.
+Tu es orchestrator_agent, cerveau principal du système.
 
 Contrat d'autonomie global:
 {AUTONOMY_RULES}
@@ -636,6 +681,9 @@ Cycle actuel:
 
 Contexte courant:
 {context}
+
+Contexte orchestrateur:
+{orchestrator_context}
 
 Contexte repository initial:
 {_repo_context_text(memory)}
@@ -731,6 +779,9 @@ Contexte repository initial:
 
 Contexte collaboration multi-agent:
 {_collaboration_text(memory)}
+
+Contexte coder_agent:
+{build_coder_context(memory)}
 
 Analyse courante:
 {task_analysis}
@@ -1112,6 +1163,7 @@ def _execute_tool_with_auto_correction(
             "args": current_args,
             "error": error_text,
         }
+        record_retry(memory, phase="debug", reason=error_text)
         failure_history.append(failure_entry)
         memory["last_tool_analysis"] = {
             "tool": tool,
