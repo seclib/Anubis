@@ -64,6 +64,14 @@ Available tools:
 - find_entrypoints: {"root": "<optional path>"}
 - find_file: {"name": "<filename>"}
 - get_file_tree: {"path": "<path>"}
+- developer_project_status: {"root": "<optional project root>"}
+- developer_autonomy_plan: {"root": "<optional project root>"}
+- create_project_scaffold: {"project_type": "python|fastapi", "path": "<project path>", "name": "<project name>"}
+- install_project_dependencies: {"command": "<optional install command>", "root": "<optional project root>"}
+- run_project_build: {"command": "<optional build command>", "root": "<optional project root>"}
+- run_project_tests: {"command": "<optional test command>", "root": "<optional project root>"}
+- start_project_server: {"command": "<optional server command>", "root": "<optional project root>", "name": "<server name>"}
+- stop_project_server: {"name": "<server name>"}
 - final: {"result": "<result>"}
 
 IMPORTANT:

@@ -98,6 +98,12 @@ def live_execution_snapshot(event: dict[str, Any]) -> dict[str, Any]:
     plan = _plan_steps(event)
     if plan:
         live["plan"] = plan
+    if event.get("priority_plan") is not None:
+        live["priority_plan"] = event["priority_plan"]
+    if event.get("parallel_batches") is not None:
+        live["parallel_batches"] = event["parallel_batches"]
+    if event.get("dependency_graph") is not None:
+        live["dependency_graph"] = event["dependency_graph"]
 
     if event_type == "tool_correction":
         live["correction"] = {
@@ -245,6 +251,20 @@ def format_live_execution_event(event: dict[str, Any]) -> str:
 
     if live.get("plan"):
         text += "\n**Planning Steps**\n" + _format_plan(live["plan"]) + "\n"
+    if live.get("priority_plan"):
+        text += "\n**Priority Engine**\n" + _markdown_code_block(
+            json.dumps(
+                {
+                    "critical_path": live["priority_plan"].get("critical_path"),
+                    "dependency_graph": live.get("dependency_graph"),
+                    "parallel_batches": live.get("parallel_batches"),
+                },
+                ensure_ascii=False,
+                indent=2,
+                default=str,
+            ),
+            "json",
+        )
 
     shell = live.get("shell")
     if isinstance(shell, dict) and shell:

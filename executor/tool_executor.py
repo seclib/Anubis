@@ -6,6 +6,16 @@ import logging
 import traceback
 from typing import Any, Callable, Mapping
 
+from tools.autonomous_developer import (
+    create_project_scaffold,
+    developer_autonomy_plan,
+    developer_project_status,
+    install_project_dependencies,
+    run_project_build,
+    run_project_tests,
+    start_project_server,
+    stop_project_server,
+)
 from tools.dynamic_tools import (
     DynamicToolError,
     create_dynamic_tool,
@@ -61,6 +71,14 @@ TOOLS: dict[str, ToolFunction] = {
     "rollback_last_autonomous_commit": rollback_last_autonomous_commit,
     "create_dynamic_tool": create_dynamic_tool,
     "list_dynamic_tools": list_dynamic_tools,
+    "developer_project_status": developer_project_status,
+    "developer_autonomy_plan": developer_autonomy_plan,
+    "create_project_scaffold": create_project_scaffold,
+    "install_project_dependencies": install_project_dependencies,
+    "run_project_build": run_project_build,
+    "run_project_tests": run_project_tests,
+    "start_project_server": start_project_server,
+    "stop_project_server": stop_project_server,
 }
 
 

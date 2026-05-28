@@ -20,6 +20,7 @@ from agent.self_improvement import (
     update_self_improvement_memory,
 )
 from executor import tool_executor
+from tools import autonomous_developer
 from tools import git_autonomy
 from tools import dynamic_tools
 from tools.sandbox import SandboxViolation, audit_tool_action, validate_command
@@ -42,9 +43,12 @@ from agent.debugger_agent import (
 from agent.orchestrator_agent import (
     ORCHESTRATOR_RESPONSIBILITIES,
     aggregate_results,
+    build_parallel_batches,
+    build_priority_plan,
     priority_for_phase,
     record_assignment,
     record_result,
+    update_priority_engine,
 )
 from agent.prompts import AUTONOMY_RULES, SYSTEM_PROMPT
 from agent.reviewer_agent import (
@@ -206,6 +210,170 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertIn("coder_agent [action] success=True", aggregate_results(memory))
         self.assertEqual(memory["agent_communication"]["queue"][0]["recipient"], loop.CODER_AGENT)
         self.assertEqual(memory["agent_communication"]["queue"][0]["type"], "task")
+
+    def test_priority_engine_orders_dependencies_and_parallel_batches(self):
+        plan = [
+            {"step": 1, "goal": "Inspect repository", "tool_hint": "scan_repo_tree"},
+            {"step": 2, "goal": "Implement security fix", "tool_hint": "write_file", "critical": True},
+            {"step": 3, "goal": "Run validation tests", "tool_hint": "run_command"},
+            {"step": 4, "goal": "Review architecture quality", "phase": "review"},
+            {"step": 5, "goal": "Summarize memory", "phase": "memory_summary"},
+        ]
+
+        priority_plan = build_priority_plan("Ship secure feature", plan)
+
+        self.assertEqual(priority_plan["dependency_graph"]["step_1"], [])
+        self.assertIn("step_1", priority_plan["dependency_graph"]["step_2"])
+        self.assertIn("step_2", priority_plan["dependency_graph"]["step_3"])
+        self.assertEqual(priority_plan["steps"][0]["id"], "step_2")
+        self.assertIn("step_2", priority_plan["critical_path"])
+        self.assertTrue(priority_plan["parallel_batches"])
+
+    def test_parallel_batches_group_ready_independent_steps(self):
+        steps = [
+            {
+                "id": "inspect_a",
+                "phase": "analysis",
+                "priority": 100,
+                "depends_on": [],
+                "parallelizable": True,
+            },
+            {
+                "id": "inspect_b",
+                "phase": "analysis",
+                "priority": 90,
+                "depends_on": [],
+                "parallelizable": True,
+            },
+            {
+                "id": "implement",
+                "phase": "action",
+                "priority": 120,
+                "depends_on": ["inspect_a", "inspect_b"],
+                "parallelizable": False,
+            },
+        ]
+
+        batches = build_parallel_batches(steps)
+
+        self.assertEqual({step["id"] for step in batches[0]}, {"inspect_a", "inspect_b"})
+        self.assertEqual(batches[1][0]["id"], "implement")
+
+    def test_developer_project_status_detects_python_workflow(self):
+        status = autonomous_developer.developer_project_status(".")
+
+        self.assertIn("python", status["project_types"])
+        self.assertEqual(
+            status["commands"]["install_dependencies"],
+            "python3 -m pip install -r requirements.txt",
+        )
+        self.assertEqual(status["commands"]["build"], "python3 -m compileall .")
+        self.assertEqual(status["commands"]["test"], "python3 -m unittest discover -s tests")
+
+    def test_create_project_scaffold_creates_minimal_python_project(self):
+        root = Path("state") / "test_scaffold_project"
+        if root.exists():
+            shutil.rmtree(root)
+
+        result = autonomous_developer.create_project_scaffold(
+            project_type="python",
+            path=str(root),
+            name="demo",
+        )
+
+        self.assertTrue(result["success"])
+        self.assertTrue((root / "app.py").exists())
+        self.assertTrue((root / "tests" / "test_app.py").exists())
+        self.assertIn("run_project_tests", loop.TOOL_SPECS)
+
+        shutil.rmtree(root)
+
+    def test_developer_build_and_test_commands_return_structured_results(self):
+        root = Path("state") / "test_dev_project"
+        if root.exists():
+            shutil.rmtree(root)
+        (root / "tests").mkdir(parents=True)
+        (root / "app.py").write_text("def main():\n    return 'ok'\n", encoding="utf-8")
+        (root / "tests" / "test_app.py").write_text(
+            "import unittest\n\n"
+            "from app import main\n\n\n"
+            "class AppTest(unittest.TestCase):\n"
+            "    def test_main(self):\n"
+            "        self.assertEqual(main(), 'ok')\n",
+            encoding="utf-8",
+        )
+
+        build = autonomous_developer.run_project_build(
+            command="python3 -m py_compile app.py",
+            root=str(root),
+        )
+        tests = autonomous_developer.run_project_tests(
+            command="python3 -m unittest discover -s tests",
+            root=str(root),
+        )
+
+        self.assertTrue(build["success"], build)
+        self.assertEqual(build["stage"], "build")
+        self.assertTrue(tests["success"], tests)
+        self.assertEqual(tests["stage"], "test")
+
+        shutil.rmtree(root)
+
+    def test_start_and_stop_project_server_tracks_process(self):
+        root = Path("state") / "test_server_project"
+        if root.exists():
+            shutil.rmtree(root)
+        root.mkdir(parents=True)
+        (root / "server.py").write_text(
+            "import time\n\n"
+            "time.sleep(30)\n",
+            encoding="utf-8",
+        )
+
+        started = autonomous_developer.start_project_server(
+            command="python3 server.py",
+            root=str(root),
+            name="test_dev_server",
+            wait_seconds=0.1,
+        )
+        stopped = autonomous_developer.stop_project_server(name="test_dev_server")
+
+        self.assertTrue(started["success"], started)
+        self.assertEqual(started["status"], "running")
+        self.assertTrue(stopped["success"], stopped)
+        self.assertEqual(stopped["status"], "stopped")
+
+        shutil.rmtree(root)
+
+    def test_developer_mode_tools_are_registered(self):
+        expected_tools = {
+            "developer_project_status",
+            "developer_autonomy_plan",
+            "create_project_scaffold",
+            "install_project_dependencies",
+            "run_project_build",
+            "run_project_tests",
+            "start_project_server",
+            "stop_project_server",
+        }
+
+        self.assertTrue(expected_tools.issubset(tool_executor.TOOLS))
+        self.assertTrue(expected_tools.issubset(loop.TOOL_SPECS))
+
+    def test_priority_engine_is_stored_in_orchestration_memory(self):
+        memory = loop._initial_memory("Prioritize work", use_planner=True)
+        priority_plan = update_priority_engine(
+            memory,
+            "Prioritize work",
+            [
+                {"step": 1, "goal": "Inspect", "tool_hint": "scan_repo_tree"},
+                {"step": 2, "goal": "Implement", "tool_hint": "write_file"},
+            ],
+        )
+
+        self.assertEqual(memory["priority_plan"], priority_plan)
+        self.assertEqual(memory["orchestration"]["dependency_graph"], priority_plan["dependency_graph"])
+        self.assertIn("parallel_batches", memory["orchestration"])
 
     def test_inter_agent_queue_orders_delivers_and_records_history(self):
         memory = loop._initial_memory("Coordinate agents", use_planner=True)

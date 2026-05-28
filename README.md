@@ -83,6 +83,13 @@ They also communicate through an internal structured bus:
 - orchestrator assignments automatically become queued tasks
 - agent results and context are shared back to the orchestrator and team
 
+The orchestrator also runs a priority engine:
+- decomposes complex plans into dependency-aware steps
+- boosts critical work such as security, debugging, validation, and implementation
+- stores a dependency graph and critical path
+- groups independent read/review/test/memory steps into parallelizable batches
+- routes each step to the best specialized agent based on phase/tool hints
+
 ### 5. **Task Validation**
 Before completion, the agent validates:
 - ✓ All created files exist
@@ -98,6 +105,7 @@ Before completion, the agent validates:
 - Compact state summaries for LLM
 - Multi-agent collaboration transcript and summary
 - Inter-agent communication queue, inboxes, and history
+- Continuous improvement metrics, recurring failures, and prompt guidance
 
 ### 7. **Local Vector Memory / Repository RAG**
 - Indexes repository files into a local vector store
@@ -136,6 +144,23 @@ Automatic detection of:
 - The executor reloads generated tools automatically before each call
 - Dynamic tools can be listed and reused in later agent steps
 - Unsafe imports and calls such as `subprocess`, `os`, `eval`, and `open` are rejected
+
+### 12. **Continuous Improvement Mode**
+- Analyzes tool success rate, failed tools, no-progress cycles, and recurrent errors
+- Stores self-improvement state in runtime memory
+- Injects strategy improvements into analysis, action, review, and correction prompts
+- Recommends safer tool strategies such as inspecting paths before `read_file`
+- Emits live `self_improvement` progress events during autonomous runs
+- Optimizes future behavior without changing code unless a normal tool/action does it explicitly
+
+### 13. **Autonomous Developer Mode**
+- Detects the active project workflow and chooses install, build, test, and server commands
+- Can create a minimal Python or FastAPI project scaffold inside the workspace
+- Installs dependencies with sandbox-validated commands when a dependency file exists
+- Runs build/compile checks and test suites with structured stdout/stderr/code results
+- Starts and tracks local app servers with logs under `state/dev_servers/`
+- Stops tracked servers safely and records server metadata for later cleanup
+- Provides an autonomy plan that keeps retrying through debugger/coder/tester cycles until success or total blockage
 
 ## Module Responsibilities
 
@@ -321,6 +346,16 @@ Git tools available to agents:
 Dynamic tools available to agents:
 - `create_dynamic_tool`: save, validate, and load a reusable Python tool in `tools/generated/`
 - `list_dynamic_tools`: list generated tools currently loadable by the executor
+
+Autonomous developer tools available to agents:
+- `developer_project_status`: detect project type and workflow commands
+- `developer_autonomy_plan`: create the install/build/test/server execution plan
+- `create_project_scaffold`: create a minimal Python or FastAPI project
+- `install_project_dependencies`: run dependency installation
+- `run_project_build`: run build or compile validation
+- `run_project_tests`: run tests and return structured errors
+- `start_project_server`: launch a tracked server process
+- `stop_project_server`: stop a tracked server process
 
 ### Connecting Open WebUI
 

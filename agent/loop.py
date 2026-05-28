@@ -41,6 +41,7 @@ from agent.orchestrator_agent import (
     record_result,
     record_retry,
     select_agent_for_phase,
+    update_priority_engine,
 )
 from agent.parser import parse_action
 from agent.planner import plan_steps
@@ -113,6 +114,27 @@ TOOL_SPECS = {
         "code": "def run(...):\n    ...",
     },
     "list_dynamic_tools": {},
+    "developer_project_status": {"root": "<optional project root>"},
+    "developer_autonomy_plan": {"root": "<optional project root>"},
+    "create_project_scaffold": {
+        "project_type": "python|fastapi",
+        "path": "<project path>",
+        "name": "<project name>",
+        "overwrite": False,
+    },
+    "install_project_dependencies": {
+        "command": "<optional install command>",
+        "root": "<optional project root>",
+    },
+    "run_project_build": {"command": "<optional build command>", "root": "<optional project root>"},
+    "run_project_tests": {"command": "<optional test command>", "root": "<optional project root>"},
+    "start_project_server": {
+        "command": "<optional server command>",
+        "root": "<optional project root>",
+        "name": "<server name>",
+        "wait_seconds": 1,
+    },
+    "stop_project_server": {"name": "<server name>"},
     "final": {"result": "<result>"},
 }
 
@@ -1755,7 +1777,8 @@ Task:
 Context:
 {planner_context}
 
-Return a JSON list of objects with step, goal, and tool_hint.
+Return a JSON list of objects with step, goal, tool_hint, optional phase, optional depends_on, and optional critical.
+Split complex work into inspect -> implement -> validate/review steps when useful.
 """
                     raw_plan = _call_agent(
                         PLANNER_AGENT,
@@ -1769,6 +1792,7 @@ Return a JSON list of objects with step, goal, and tool_hint.
                 else:
                     plan = []
                 memory["plan"] = plan or []
+                priority_plan = update_priority_engine(memory, task, memory["plan"])
                 memory["consecutive_failures"] = 0
                 _emit_progress(
                     progress_callback,
@@ -1776,6 +1800,9 @@ Return a JSON list of objects with step, goal, and tool_hint.
                     f"Plan ready with {len(memory['plan'])} step(s)",
                     state=STATE_PLAN,
                     plan=memory["plan"],
+                    priority_plan=priority_plan,
+                    parallel_batches=priority_plan.get("parallel_batches", []),
+                    dependency_graph=priority_plan.get("dependency_graph", {}),
                 )
             except Exception as exc:
                 logger.warning("Planner failed: %s", exc)
