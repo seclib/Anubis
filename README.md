@@ -106,6 +106,14 @@ Automatic detection of:
 - Framework (React, Vue, Django, Flask, FastAPI, etc.)
 - Entry points (main files, scripts, Dockerfile)
 
+### 9. **Autonomous Git System**
+- Runs validation commands before creating commits
+- Creates an automatic commit after successful task verification
+- Generates a deterministic commit message from the task and changed files
+- Supports optional temporary branches for isolated autonomous runs
+- Records commit history locally and can rollback the last autonomous commit
+- Aborts commits when validation fails to avoid committing broken work
+
 ## Module Responsibilities
 
 ### `agent/`
@@ -180,6 +188,12 @@ export MAX_RETRIES="3"                 # Retry attempts per tool
 export MAX_TOOL_RETRIES="3"           # Tool executor retries
 export CONTINUOUS_RUN="true"          # Always run without interruption
 
+# Autonomous Git
+export AUTO_GIT_COMMIT_ENABLED="true" # Commit automatically after verified success
+export GIT_VALIDATION_COMMANDS="python3 -m unittest discover -s tests"
+export GIT_USE_TEMP_BRANCH="false"    # Set true to commit on temporary branches
+export GIT_TEMP_BRANCH_PREFIX="anubis/auto"
+
 # OpenAI-compatible API
 export API_HOST="127.0.0.1"
 export API_PORT="8000"
@@ -253,6 +267,13 @@ RAG tools available to agents:
 - `index_repository`: refresh the local vector index
 - `semantic_search`: search indexed repository and agent history semantically
 - `retrieve_context`: return prompt-ready relevant context
+
+Git tools available to agents:
+- `git_status`: inspect branch and working-tree changes
+- `generate_commit_message`: produce an intelligent commit message
+- `run_git_validations`: run configured validation before committing
+- `autonomous_git_commit`: validate, stage, and commit safe changes
+- `rollback_last_autonomous_commit`: revert or hard-reset the last autonomous commit
 
 ### Connecting Open WebUI
 

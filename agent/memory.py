@@ -36,6 +36,7 @@ def _default_memory() -> dict[str, Any]:
         "last_validation_report": None,
         "last_debugger_report": None,
         "last_review_report": None,
+        "last_git_commit": None,
         "collaboration_summary": "",
         "final_result": None,
     }

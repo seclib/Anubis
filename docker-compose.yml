@@ -15,6 +15,10 @@ services:
       API_BASE_PATH: ${API_BASE_PATH:-/v1}
       API_AUTH_REQUIRED: "false"
       CONTINUOUS_RUN: "true"
+      AUTO_GIT_COMMIT_ENABLED: ${AUTO_GIT_COMMIT_ENABLED:-true}
+      GIT_USE_TEMP_BRANCH: ${GIT_USE_TEMP_BRANCH:-false}
+      GIT_TEMP_BRANCH_PREFIX: ${GIT_TEMP_BRANCH_PREFIX:-anubis/auto}
+      GIT_VALIDATION_COMMANDS: ${GIT_VALIDATION_COMMANDS:-python3 -m unittest discover -s tests}
       LOG_LEVEL: INFO
       OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://host.docker.internal:11434}
       OLLAMA_MODEL: ${OLLAMA_MODEL:-mistral}

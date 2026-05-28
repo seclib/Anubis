@@ -48,6 +48,17 @@ MAX_RETRIES = int(os.getenv("MAX_RETRIES", "3"))
 MAX_TOOL_RETRIES = int(os.getenv("MAX_TOOL_RETRIES", "3"))
 TOOL_COMMAND_TIMEOUT = int(os.getenv("TOOL_COMMAND_TIMEOUT", "120"))
 CONTINUOUS_RUN = os.getenv("CONTINUOUS_RUN", "true").lower() == "true"
+AUTO_GIT_COMMIT_ENABLED = os.getenv("AUTO_GIT_COMMIT_ENABLED", "true").lower() == "true"
+GIT_USE_TEMP_BRANCH = os.getenv("GIT_USE_TEMP_BRANCH", "false").lower() == "true"
+GIT_TEMP_BRANCH_PREFIX = os.getenv("GIT_TEMP_BRANCH_PREFIX", "anubis/auto")
+GIT_VALIDATION_COMMANDS = [
+    command.strip()
+    for command in os.getenv(
+        "GIT_VALIDATION_COMMANDS",
+        "python3 -m unittest discover -s tests",
+    ).split("&&")
+    if command.strip()
+]
 
 # OpenAI-compatible API
 API_HOST = os.getenv("API_HOST", "127.0.0.1")
@@ -92,6 +103,10 @@ __all__ = [
     "MAX_TOOL_RETRIES",
     "TOOL_COMMAND_TIMEOUT",
     "CONTINUOUS_RUN",
+    "AUTO_GIT_COMMIT_ENABLED",
+    "GIT_USE_TEMP_BRANCH",
+    "GIT_TEMP_BRANCH_PREFIX",
+    "GIT_VALIDATION_COMMANDS",
     "API_HOST",
     "API_PORT",
     "API_BASE_PATH",

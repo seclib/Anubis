@@ -7,6 +7,13 @@ import traceback
 from typing import Any, Callable, Mapping
 
 from tools.filesystem import list_files, read_file, write_file
+from tools.git_autonomy import (
+    autonomous_git_commit,
+    generate_commit_message,
+    git_status,
+    rollback_last_autonomous_commit,
+    run_git_validations,
+)
 from tools.repo import (
     detect_project_type,
     find_entrypoints,
@@ -41,6 +48,11 @@ TOOLS: dict[str, ToolFunction] = {
     "index_repository": index_repository,
     "semantic_search": semantic_search,
     "retrieve_context": retrieve_context,
+    "git_status": git_status,
+    "generate_commit_message": generate_commit_message,
+    "run_git_validations": run_git_validations,
+    "autonomous_git_commit": autonomous_git_commit,
+    "rollback_last_autonomous_commit": rollback_last_autonomous_commit,
 }
 
 

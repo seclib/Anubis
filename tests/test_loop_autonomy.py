@@ -1,9 +1,13 @@
 import json
+import shutil
+import subprocess
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from agent import loop
 from agent import vector_memory
+from tools import git_autonomy
 from agent.coder_agent import (
     CODER_PROMPT,
     CODER_RESPONSIBILITIES,
@@ -47,6 +51,38 @@ from agent.tester_agent import (
 
 
 class AutonomousLoopTest(unittest.TestCase):
+    def _prepare_git_repo(self, name: str) -> Path:
+        root = Path("state") / name
+        if root.exists():
+            shutil.rmtree(root)
+        root.mkdir(parents=True)
+        subprocess.run(["git", "init"], cwd=root, check=True, capture_output=True, text=True)
+        subprocess.run(
+            ["git", "config", "user.email", "anubis@example.local"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        subprocess.run(
+            ["git", "config", "user.name", "Anubis Agent"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        (root / ".gitignore").write_text("state/autonomous_git_history.json\n")
+        (root / "README.md").write_text("initial\n")
+        subprocess.run(["git", "add", "."], cwd=root, check=True, capture_output=True, text=True)
+        subprocess.run(
+            ["git", "commit", "-m", "Initial commit"],
+            cwd=root,
+            check=True,
+            capture_output=True,
+            text=True,
+        )
+        return root.resolve()
+
     def _fake_call_agent(self, fake_llm):
         def call_agent(agent_name: str, prompt: str, collaboration_context: str = "") -> str:
             if agent_name == loop.PLANNER_AGENT:
@@ -313,6 +349,78 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertEqual(matches[0]["kind"], "agent_history")
         self.assertIn("semantic repository search", matches[0]["text"])
         test_store_path.unlink(missing_ok=True)
+
+    def test_autonomous_git_commit_validates_before_commit(self):
+        repo_root = self._prepare_git_repo("test_git_commit")
+        try:
+            (repo_root / "README.md").write_text("changed\n")
+
+            with patch.object(git_autonomy, "workspace_root", return_value=repo_root):
+                result = git_autonomy.autonomous_git_commit(
+                    task="update git automation",
+                    message="Update git automation",
+                    validation_commands=["git rev-parse --is-inside-work-tree"],
+                )
+                status = git_autonomy.git_status()
+
+            self.assertTrue(result["success"])
+            self.assertEqual(result["status"], "committed")
+            self.assertIn("README.md", result["files"])
+            self.assertFalse(status["dirty"])
+        finally:
+            shutil.rmtree(repo_root, ignore_errors=True)
+
+    def test_autonomous_git_commit_aborts_when_validation_fails(self):
+        repo_root = self._prepare_git_repo("test_git_validation_failure")
+        try:
+            original_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            (repo_root / "README.md").write_text("broken\n")
+
+            with patch.object(git_autonomy, "workspace_root", return_value=repo_root):
+                result = git_autonomy.autonomous_git_commit(
+                    task="broken change",
+                    validation_commands=["git diff --quiet"],
+                )
+                status = git_autonomy.git_status()
+
+            current_head = subprocess.run(
+                ["git", "rev-parse", "HEAD"],
+                cwd=repo_root,
+                check=True,
+                capture_output=True,
+                text=True,
+            ).stdout.strip()
+            self.assertFalse(result["success"])
+            self.assertEqual(result["status"], "validation_failed")
+            self.assertEqual(current_head, original_head)
+            self.assertTrue(status["dirty"])
+        finally:
+            shutil.rmtree(repo_root, ignore_errors=True)
+
+    def test_autonomous_git_rollback_reverts_last_commit(self):
+        repo_root = self._prepare_git_repo("test_git_rollback")
+        try:
+            (repo_root / "README.md").write_text("committed change\n")
+
+            with patch.object(git_autonomy, "workspace_root", return_value=repo_root):
+                commit_result = git_autonomy.autonomous_git_commit(
+                    task="rollback demo",
+                    message="Update rollback demo",
+                    validation_commands=["git rev-parse --is-inside-work-tree"],
+                )
+                rollback_result = git_autonomy.rollback_last_autonomous_commit()
+
+            self.assertTrue(commit_result["success"])
+            self.assertTrue(rollback_result["success"])
+            self.assertEqual((repo_root / "README.md").read_text(), "initial\n")
+        finally:
+            shutil.rmtree(repo_root, ignore_errors=True)
 
     def test_loop_reanalyzes_until_completion_without_human_stop(self):
         events = []

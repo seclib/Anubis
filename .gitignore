@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .env
 state/runtime.json
+state/vector_store.json
+state/autonomous_git_history.json

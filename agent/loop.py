@@ -51,7 +51,13 @@ from agent.tester_agent import (
     normalize_validation_report,
 )
 from agent.vector_memory import index_agent_history, retrieve_context
-from config import CONTINUOUS_RUN, MAX_RETRIES, MAX_STEPS as CONFIG_MAX_STEPS, MAX_TOOL_RETRIES
+from config import (
+    AUTO_GIT_COMMIT_ENABLED,
+    CONTINUOUS_RUN,
+    MAX_RETRIES,
+    MAX_STEPS as CONFIG_MAX_STEPS,
+    MAX_TOOL_RETRIES,
+)
 from executor.tool_executor import execute_tool
 
 logger = logging.getLogger(__name__)
@@ -82,6 +88,16 @@ TOOL_SPECS = {
     "index_repository": {"root": "<optional path>", "force": False},
     "semantic_search": {"query": "<semantic query>", "top_k": 5, "kind": "<optional kind>"},
     "retrieve_context": {"query": "<semantic query>", "top_k": 5},
+    "git_status": {},
+    "generate_commit_message": {"task": "<optional task>"},
+    "run_git_validations": {"commands": "<optional list of commands>"},
+    "autonomous_git_commit": {
+        "task": "<task summary>",
+        "message": "<optional commit message>",
+        "use_temp_branch": False,
+        "validation_commands": "<optional list of commands>",
+    },
+    "rollback_last_autonomous_commit": {"hard": False},
     "final": {"result": "<result>"},
 }
 
@@ -241,6 +257,7 @@ def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
         "blocked_retry": None,
         "last_tool_analysis": None,
         "last_repo_analysis": None,
+        "last_git_commit": None,
         "self_healing": {
             "max_tool_retries": MAX_SELF_HEALING_RETRIES,
             "persistent_failures": 0,
@@ -1439,6 +1456,76 @@ def _verify_result(
     }
 
 
+def _attempt_autonomous_git_commit(
+    task: str,
+    memory: dict[str, Any],
+    progress_callback: ProgressCallback | None = None,
+) -> dict[str, Any]:
+    if not AUTO_GIT_COMMIT_ENABLED:
+        result = {
+            "success": True,
+            "output": {
+                "success": True,
+                "status": "disabled",
+                "message": "Automatic Git commit disabled.",
+            },
+        }
+        memory["last_git_commit"] = result
+        return result
+
+    args = {"task": task}
+    _emit_progress(
+        progress_callback,
+        "tool_start",
+        "Running tool `autonomous_git_commit` after successful verification",
+        tool="autonomous_git_commit",
+        args=args,
+        attempt=1,
+        max_attempts=1,
+        state=memory.get("state"),
+        step=memory.get("total_steps"),
+        cycle=memory.get("cycle"),
+    )
+    result = execute_tool("autonomous_git_commit", args)
+    memory["last_git_commit"] = result
+    _record_event(
+        memory=memory,
+        step=int(memory.get("total_steps", 0)),
+        action="auto_commit",
+        tool="autonomous_git_commit",
+        args=args,
+        result=result,
+        reason="Task verified successfully; commit safe changes automatically",
+        next_step="complete task" if result.get("success") else "fix validation failure",
+        metadata={"git_autonomy": True},
+    )
+
+    output = result.get("output")
+    output_success = output.get("success") if isinstance(output, dict) else result.get("success")
+    success = bool(result.get("success")) and output_success is not False
+    _emit_progress(
+        progress_callback,
+        "tool_result" if success else "tool_error",
+        "Autonomous Git commit succeeded" if success else "Autonomous Git commit failed",
+        tool="autonomous_git_commit",
+        args=args,
+        result=result,
+        state=memory.get("state"),
+        step=memory.get("total_steps"),
+        cycle=memory.get("cycle"),
+    )
+    return result
+
+
+def _git_commit_succeeded(result: dict[str, Any]) -> bool:
+    if not result.get("success"):
+        return False
+    output = result.get("output")
+    if isinstance(output, dict):
+        return output.get("success") is not False
+    return True
+
+
 def run_agent_loop(
     task: str,
     use_planner: bool = True,
@@ -1777,6 +1864,29 @@ Return a JSON list of objects with step, goal, and tool_hint.
                     or memory.get("pending_final")
                     or memory.get("last_result", {}).get("output", "")
                 )
+                git_result = _attempt_autonomous_git_commit(
+                    task,
+                    memory,
+                    progress_callback=progress_callback,
+                )
+                if not _git_commit_succeeded(git_result):
+                    memory["pending_final"] = None
+                    memory["last_result"] = {
+                        "success": False,
+                        "output": git_result,
+                    }
+                    memory["consecutive_failures"] = int(memory.get("consecutive_failures", 0)) + 1
+                    _emit_progress(
+                        progress_callback,
+                        "transition",
+                        "Autonomous Git validation failed, returning to FIX before completion",
+                        state=STATE_FIX,
+                        result=git_result,
+                    )
+                    _set_state(memory, STATE_FIX, status="running")
+                    save_memory(memory)
+                    continue
+
                 memory["final_result"] = final_output
                 memory["completed_at"] = _now_iso()
                 _mark_progress(memory, "Task completed")
