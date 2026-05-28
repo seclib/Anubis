@@ -37,4 +37,3 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import json, urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); payload = json.loads(response.read().decode()); raise SystemExit(0 if payload.get('status') == 'ok' else 1)"
 
 ENTRYPOINT ["python", "-m", "app.main"]
-CMD ["serve"]

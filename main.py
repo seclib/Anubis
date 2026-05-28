@@ -11,7 +11,7 @@ from pathlib import Path
 # Add project root to path
 sys.path.insert(0, str(Path(__file__).parent))
 
-from api import run_openai_compatible_server
+from app.main import main as run_fastapi_server
 from config import (
     API_HOST,
     API_PORT,
@@ -47,9 +47,9 @@ def main() -> None:
     
     try:
         if len(sys.argv) > 1 and sys.argv[1] == "serve":
-            print(f"🌐 Starting OpenAI-compatible API on http://{API_HOST}:{API_PORT}/v1\n")
-            logger.info("Starting OpenAI-compatible API server")
-            run_openai_compatible_server()
+            print(f"🌐 Starting FastAPI API on http://{API_HOST}:{API_PORT}/v1\n")
+            logger.info("Starting FastAPI API server")
+            run_fastapi_server()
             return
 
         task = input("📝 Enter task (or 'status' to check state): ").strip()

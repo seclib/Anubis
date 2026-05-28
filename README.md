@@ -6,9 +6,9 @@ A fully autonomous AI development agent that runs locally with **Ollama**, execu
 
 ```
 anubis-agent/
-├── app/                 # Docker-friendly entrypoints
+├── app/                # FastAPI OpenAI-compatible API
 │   ├── __init__.py
-│   └── main.py
+│   └── main.py         # FastAPI app + Open WebUI compatibility
 ├── agent/               # Core orchestration & reasoning
 │   ├── __init__.py
 │   ├── loop.py         # State machine + main agent loop
@@ -32,7 +32,7 @@ anubis-agent/
 ├── Dockerfile
 ├── docker-compose.yml
 ├── requirements.txt
-├── main.py            # Entry point
+├── main.py            # Legacy CLI entry point
 ├── config.py          # Configuration
 └── README.md          # This file
 ```
@@ -170,7 +170,7 @@ print(result)
 python3 main.py serve
 ```
 
-This starts a local OpenAI-compatible backend at:
+This starts the FastAPI backend at:
 
 ```text
 http://localhost:8000/v1
@@ -218,6 +218,7 @@ The container:
 - uses `/workspace` as the project root
 - reaches Ollama through `http://host.docker.internal:11434`
 - exposes the OpenAI-compatible API on `http://localhost:8000/v1`
+- supports Open WebUI streaming via `stream=true`
 
 If your local UID/GID is not `1000`, export `UID` and `GID` before building so the workspace mount stays writable.
 
