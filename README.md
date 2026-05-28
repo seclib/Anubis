@@ -65,7 +65,7 @@ Anubis runs a collaborative team of specialized agents:
 - `orchestrator_agent`: main brain; receives the user task, distributes work, coordinates steps, aggregates results, and manages retries/priorities
 - `planner_agent`: decomposes work into concrete execution steps
 - `coder_agent`: modifies code, creates files, refactors, and implements features with minimal clean changes; recommended model `deepseek-coder-v2`
-- `reviewer_agent`: reviews correctness and completion
+- `reviewer_agent`: acts as a critical senior engineer; reviews generated code, detects potential bugs, verifies architecture quality, and proposes improvements
 - `tester_agent`: executes tests, runs validation commands, detects runtime errors, analyzes shell output, and returns structured validation reports
 - `debugger_agent`: autonomously analyzes stack traces, identifies probable causes, proposes corrections, and reruns fixes
 - `memory_agent`: summarizes collaboration and keeps shared context compact
@@ -92,7 +92,15 @@ Before completion, the agent validates:
 - Compact state summaries for LLM
 - Multi-agent collaboration transcript and summary
 
-### 7. **Project Introspection**
+### 7. **Local Vector Memory / Repository RAG**
+- Indexes repository files into a local vector store
+- Supports semantic search over code and documentation
+- Retrieves relevant context for analysis, coding, review, and debugging prompts
+- Indexes agent action history for cross-agent recall
+- Uses Ollama embeddings with `bge-m3` by default; `nomic-embed-text` is also supported
+- Stores vectors locally in `state/vector_store.json`
+
+### 8. **Project Introspection**
 Automatic detection of:
 - Project type (Node, Python, Docker, Go, Rust, Java)
 - Framework (React, Vue, Django, Flask, FastAPI, etc.)
@@ -154,6 +162,8 @@ export OLLAMA_MODEL="mistral"          # or llama2, neural-chat, etc.
 export LLM_TEMPERATURE="0.7"
 export LLM_MAX_TOKENS="2000"
 export PROJECT_ROOT="$(pwd)"           # Workspace root
+export EMBEDDING_MODEL="bge-m3"         # or nomic-embed-text
+export VECTOR_STORE_FILE="state/vector_store.json"
 
 # Multi-agent Ollama models
 export ORCHESTRATOR_AGENT_MODEL="$OLLAMA_MODEL"
@@ -238,6 +248,11 @@ This endpoint returns Server-Sent Events:
 - `agent_result`: final agent result
 - `agent_error`: execution error
 - `agent_done`: stream closed cleanly
+
+RAG tools available to agents:
+- `index_repository`: refresh the local vector index
+- `semantic_search`: search indexed repository and agent history semantically
+- `retrieve_context`: return prompt-ready relevant context
 
 ### Connecting Open WebUI
 

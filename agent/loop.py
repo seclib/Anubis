@@ -39,12 +39,18 @@ from agent.orchestrator_agent import (
 from agent.parser import parse_action
 from agent.planner import plan_steps
 from agent.prompts import AUTONOMY_RULES, SYSTEM_PROMPT
+from agent.reviewer_agent import (
+    build_reviewer_context,
+    create_reviewer_state,
+    normalize_review_report,
+)
 from agent.streaming import short_text
 from agent.tester_agent import (
     build_tester_context,
     create_tester_state,
     normalize_validation_report,
 )
+from agent.vector_memory import index_agent_history, retrieve_context
 from config import CONTINUOUS_RUN, MAX_RETRIES, MAX_STEPS as CONFIG_MAX_STEPS, MAX_TOOL_RETRIES
 from executor.tool_executor import execute_tool
 
@@ -73,6 +79,9 @@ TOOL_SPECS = {
     "find_entrypoints": {"root": "<optional path>"},
     "find_file": {"name": "<filename>"},
     "get_file_tree": {"path": "<path>"},
+    "index_repository": {"root": "<optional path>", "force": False},
+    "semantic_search": {"query": "<semantic query>", "top_k": 5, "kind": "<optional kind>"},
+    "retrieve_context": {"query": "<semantic query>", "top_k": 5},
     "final": {"result": "<result>"},
 }
 
@@ -217,9 +226,11 @@ def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
         "orchestration": create_orchestrator_state(task),
         "coder_agent": create_coder_state(),
         "debugger_agent": create_debugger_state(),
+        "reviewer_agent": create_reviewer_state(),
         "tester_agent": create_tester_state(),
         "last_validation_report": None,
         "last_debugger_report": None,
+        "last_review_report": None,
         "agent_messages": [],
         "last_agent": None,
         "collaboration_summary": "",
@@ -425,6 +436,14 @@ def _collaboration_text(memory: dict[str, Any]) -> str:
     return json.dumps(payload, ensure_ascii=False, indent=2, default=str)
 
 
+def _vector_context_text(query: str) -> str:
+    try:
+        return retrieve_context(query=query, top_k=5)
+    except Exception as exc:
+        logger.debug("Vector context retrieval failed: %s", exc)
+        return "Vector context unavailable."
+
+
 def _record_agent_message(
     memory: dict[str, Any],
     agent_name: str,
@@ -452,6 +471,10 @@ def _record_agent_message(
         cycle=memory.get("cycle"),
         step=memory.get("total_steps"),
     )
+    try:
+        memory["last_agent_history_index"] = index_agent_history(memory)
+    except Exception as exc:
+        logger.debug("Agent history vector indexing failed: %s", exc)
 
 
 def _call_agent(
@@ -678,6 +701,7 @@ def _fallback_analysis(task: str, memory: dict[str, Any]) -> dict[str, Any]:
 def _build_analysis_prompt(task: str, memory: dict[str, Any]) -> str:
     context = get_context_summary(memory)
     orchestrator_context = build_orchestrator_context(memory)
+    vector_context = _vector_context_text(task)
     return f"""{SYSTEM_PROMPT}
 
 Tu es en phase d'analyse autonome.
@@ -698,6 +722,9 @@ Contexte courant:
 
 Contexte orchestrateur:
 {orchestrator_context}
+
+Contexte vectoriel pertinent:
+{vector_context}
 
 Contexte repository initial:
 {_repo_context_text(memory)}
@@ -755,6 +782,15 @@ def _build_action_prompt(task: str, memory: dict[str, Any]) -> str:
     task_analysis = _short(memory.get("task_analysis"))
     strategy_change_required = memory.get("strategy_change_required", False)
     blocked_retry = memory.get("blocked_retry") or {}
+    vector_context = _vector_context_text(
+        " ".join(
+            [
+                task,
+                _short(memory.get("task_analysis"), 500),
+                _short(memory.get("last_result"), 500),
+            ]
+        )
+    )
     if state == STATE_FIX and strategy_change_required:
         state_instruction = (
             "La tentative precedente a echoue meme apres auto-correction. "
@@ -790,6 +826,9 @@ Contexte courant:
 
 Contexte repository initial:
 {_repo_context_text(memory)}
+
+Contexte vectoriel pertinent:
+{vector_context}
 
 Contexte collaboration multi-agent:
 {_collaboration_text(memory)}
@@ -855,6 +894,9 @@ def _build_evaluate_success_prompt(
     memory: dict[str, Any],
     last_result: dict[str, Any] | None,
 ) -> str:
+    vector_context = _vector_context_text(
+        f"{task}\n{_short(last_result, 600)}\n{_short(memory.get('last_validation_report'), 600)}"
+    )
     return f"""Tu verifies l'avancement d'un agent autonome.
 
 Contrat d'autonomie global:
@@ -880,6 +922,12 @@ Dernier resultat:
 
 Contexte recent:
 {get_context_summary(memory)}
+
+Contexte vectoriel pertinent:
+{vector_context}
+
+Contexte reviewer_agent:
+{build_reviewer_context(memory)}
 
 Contexte tester_agent:
 {build_tester_context(memory)}
@@ -944,6 +992,8 @@ def evaluate_success(
         progress_callback=progress_callback,
     )
     raw_output = reviewer_output
+    review_report = normalize_review_report(parse_action(reviewer_output))
+    memory["last_review_report"] = review_report
     memory["last_tester_output"] = tester_output
     tester_report = normalize_validation_report(parse_action(tester_output))
     memory["last_validation_report"] = tester_report
@@ -986,6 +1036,7 @@ def _build_correction_prompt(
     failure_history: list[dict[str, Any]],
 ) -> str:
     max_retries = MAX_SELF_HEALING_RETRIES
+    vector_context = _vector_context_text(f"{task}\n{tool}\n{error_text}\n{_short(args, 600)}")
     return f"""{SYSTEM_PROMPT}
 
 Tu fais du self-healing de tool pour un agent autonome.
@@ -1013,6 +1064,9 @@ Historique des echecs de ce tool:
 
 Contexte recent:
 {get_context_summary(memory)}
+
+Contexte vectoriel pertinent:
+{vector_context}
 
 Contexte debugger_agent:
 {build_debugger_context(memory)}
@@ -1430,6 +1484,15 @@ def run_agent_loop(
             memory["successful_tools_at_cycle_start"] = int(memory.get("successful_tools", 0))
             memory["cycles_without_progress"] = 0
             memory["blockage_reason"] = ""
+            vector_result = execute_tool("index_repository", {"root": ".", "force": False})
+            memory["last_vector_index"] = vector_result
+            _emit_progress(
+                progress_callback,
+                "vector_index",
+                "Repository vector index refreshed",
+                state=STATE_INIT,
+                result=vector_result,
+            )
             _refresh_repo_analysis(
                 memory,
                 reason="Initial repository analysis",

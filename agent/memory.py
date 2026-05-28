@@ -27,6 +27,7 @@ def _default_memory() -> dict[str, Any]:
         "orchestration": {},
         "coder_agent": {},
         "debugger_agent": {},
+        "reviewer_agent": {},
         "tester_agent": {},
         "agent_messages": [],
         "last_action": None,
@@ -34,6 +35,7 @@ def _default_memory() -> dict[str, Any]:
         "last_agent": None,
         "last_validation_report": None,
         "last_debugger_report": None,
+        "last_review_report": None,
         "collaboration_summary": "",
         "final_result": None,
     }

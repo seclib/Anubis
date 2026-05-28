@@ -7,6 +7,7 @@ from typing import Any
 
 from agent.coder_agent import CODER_PROMPT
 from agent.debugger_agent import DEBUGGER_PROMPT
+from agent.reviewer_agent import REVIEWER_PROMPT
 from agent.tester_agent import TESTER_PROMPT
 from config import (
     CODER_AGENT_MODEL,
@@ -72,12 +73,12 @@ AGENT_SPECS: dict[str, AgentSpec] = {
     ),
     REVIEWER_AGENT: AgentSpec(
         name=REVIEWER_AGENT,
-        role="Review intermediate results for correctness, regressions, and completion readiness.",
-        model=REVIEWER_AGENT_MODEL,
-        prompt=(
-            "You are the reviewer_agent. Evaluate whether the work satisfies the task. "
-            "Look for missed requirements, unsafe changes, and incomplete outcomes."
+        role=(
+            "Critical senior engineer: review generated code, detect potential bugs, verify architecture "
+            "quality, and propose improvements."
         ),
+        model=REVIEWER_AGENT_MODEL,
+        prompt=REVIEWER_PROMPT,
     ),
     TESTER_AGENT: AgentSpec(
         name=TESTER_AGENT,

@@ -3,6 +3,7 @@ import unittest
 from unittest.mock import patch
 
 from agent import loop
+from agent import vector_memory
 from agent.coder_agent import (
     CODER_PROMPT,
     CODER_RESPONSIBILITIES,
@@ -26,6 +27,14 @@ from agent.orchestrator_agent import (
     record_result,
 )
 from agent.prompts import AUTONOMY_RULES, SYSTEM_PROMPT
+from agent.reviewer_agent import (
+    REVIEWER_PROMPT,
+    REVIEWER_RESPONSIBILITIES,
+    REVIEWER_RULES,
+    REVIEW_REPORT_SCHEMA,
+    build_reviewer_context,
+    normalize_review_report,
+)
 from agent.streaming import agent_event_payload, format_progress_event, format_sse_event
 from agent.tester_agent import (
     TESTER_PROMPT,
@@ -70,21 +79,22 @@ class AutonomousLoopTest(unittest.TestCase):
         memory = loop._initial_memory("Fix the project", use_planner=True)
         memory["last_result"] = {"success": False, "output": "boom"}
 
-        prompts = [
-            SYSTEM_PROMPT,
-            loop._build_analysis_prompt("Fix the project", memory),
-            loop._build_action_prompt("Fix the project", memory),
-            loop._build_evaluate_success_prompt("Fix the project", memory, memory["last_result"]),
-            loop._build_correction_prompt(
-                task="Fix the project",
-                memory=memory,
-                tool="read_file",
-                args={"path": "missing.md"},
-                error_text="Missing file",
-                retry_number=1,
-                failure_history=[],
-            ),
-        ]
+        with patch.object(loop, "_vector_context_text", return_value="vector context"):
+            prompts = [
+                SYSTEM_PROMPT,
+                loop._build_analysis_prompt("Fix the project", memory),
+                loop._build_action_prompt("Fix the project", memory),
+                loop._build_evaluate_success_prompt("Fix the project", memory, memory["last_result"]),
+                loop._build_correction_prompt(
+                    task="Fix the project",
+                    memory=memory,
+                    tool="read_file",
+                    args={"path": "missing.md"},
+                    error_text="Missing file",
+                    retry_number=1,
+                    failure_history=[],
+                ),
+            ]
 
         for prompt in prompts:
             self.assertIn(AUTONOMY_RULES, prompt)
@@ -217,6 +227,93 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertEqual(report["probable_causes"], ["wrong path"])
         self.assertEqual(DEBUGGER_REPORT_SCHEMA["retry"], "boolean")
 
+    def test_reviewer_agent_contract_is_senior_critical_and_structured(self):
+        memory = loop._initial_memory("Review generated code", use_planner=True)
+        roster = {agent["name"]: agent for agent in memory["agents"]}
+        reviewer = roster[loop.REVIEWER_AGENT]
+
+        self.assertEqual(memory["reviewer_agent"]["responsibilities"], REVIEWER_RESPONSIBILITIES)
+        self.assertIn("review_generated_code", REVIEWER_RESPONSIBILITIES)
+        self.assertIn("detect_potential_bugs", REVIEWER_RESPONSIBILITIES)
+        self.assertIn("verify_architecture_quality", REVIEWER_RESPONSIBILITIES)
+        self.assertIn("propose_improvements", REVIEWER_RESPONSIBILITIES)
+        self.assertIn("act as a critical senior engineer", REVIEWER_RULES)
+        self.assertIn("do not approve incomplete work", REVIEWER_RULES)
+        self.assertEqual(reviewer["prompt"], REVIEWER_PROMPT)
+        self.assertIn("Review report schema", build_reviewer_context(memory))
+
+        report = normalize_review_report(
+            {
+                "success": False,
+                "status": "changes_requested",
+                "summary": "bug risk",
+                "findings": "Potential null handling bug",
+                "architecture_notes": "Keeps module boundary",
+                "improvements": "Add focused validation",
+                "reason": "Needs fix",
+            }
+        )
+        self.assertFalse(report["success"])
+        self.assertEqual(report["status"], "changes_requested")
+        self.assertEqual(report["findings"][0]["severity"], "medium")
+        self.assertEqual(report["architecture_notes"], ["Keeps module boundary"])
+        self.assertEqual(REVIEW_REPORT_SCHEMA["success"], "boolean")
+
+    def test_vector_memory_indexes_repository_and_retrieves_context(self):
+        test_store_path = vector_memory.workspace_root() / "state" / "test_vector_store.json"
+
+        def fake_store_path():
+            return test_store_path
+
+        def fake_embed(text: str) -> list[float]:
+            text = text.lower()
+            return [
+                1.0 if "autonomous" in text else 0.0,
+                1.0 if "agent" in text else 0.0,
+                1.0 if "docker" in text else 0.0,
+            ]
+
+        with (
+            patch.object(vector_memory, "_store_path", side_effect=fake_store_path),
+            patch.object(vector_memory, "embed_text", side_effect=fake_embed),
+        ):
+            result = vector_memory.index_repository(root=".", force=True)
+            matches = vector_memory.semantic_search("autonomous agent", top_k=3)
+            context = vector_memory.retrieve_context("autonomous agent", top_k=2)
+
+        self.assertEqual(result["status"], "indexed")
+        self.assertGreater(result["total_documents"], 0)
+        self.assertTrue(matches)
+        self.assertIn("README.md", {match["source"] for match in matches})
+        self.assertIn("autonomous", context.lower())
+        test_store_path.unlink(missing_ok=True)
+
+    def test_vector_memory_indexes_agent_history(self):
+        test_store_path = vector_memory.workspace_root() / "state" / "test_history_vector_store.json"
+        memory = loop._initial_memory("Remember collaboration", use_planner=True)
+        memory["agent_messages"] = [
+            {
+                "agent": loop.CODER_AGENT,
+                "phase": "action",
+                "message": "Implemented semantic repository search",
+            }
+        ]
+
+        def fake_store_path():
+            return test_store_path
+
+        with (
+            patch.object(vector_memory, "_store_path", side_effect=fake_store_path),
+            patch.object(vector_memory, "embed_text", return_value=[1.0, 0.0, 0.0]),
+        ):
+            result = vector_memory.index_agent_history(memory)
+            matches = vector_memory.semantic_search("semantic repository search", top_k=1, kind="agent_history")
+
+        self.assertEqual(result["agent_history_documents"], 1)
+        self.assertEqual(matches[0]["kind"], "agent_history")
+        self.assertIn("semantic repository search", matches[0]["text"])
+        test_store_path.unlink(missing_ok=True)
+
     def test_loop_reanalyzes_until_completion_without_human_stop(self):
         events = []
         analysis_count = 0
@@ -298,6 +395,8 @@ class AutonomousLoopTest(unittest.TestCase):
             ),
             patch.object(loop, "execute_tool", return_value={"success": True, "output": "ok"}),
             patch.object(loop, "get_context_summary", return_value="context"),
+            patch.object(loop, "_vector_context_text", return_value="vector context"),
+            patch.object(loop, "index_agent_history", return_value={"status": "indexed"}),
             patch.object(loop, "_soft_limit_reached", side_effect=fake_soft_limit),
             patch.object(loop, "CONTINUOUS_RUN", False),
         ):
@@ -413,6 +512,8 @@ class AutonomousLoopTest(unittest.TestCase):
             ),
             patch.object(loop, "execute_tool", side_effect=fake_execute_tool),
             patch.object(loop, "get_context_summary", return_value="context"),
+            patch.object(loop, "_vector_context_text", return_value="vector context"),
+            patch.object(loop, "index_agent_history", return_value={"status": "indexed"}),
         ):
             result = loop.run_agent_loop(
                 "Exercise self-healing",
@@ -487,6 +588,8 @@ class AutonomousLoopTest(unittest.TestCase):
             patch.object(loop, "plan_steps", return_value=[]),
             patch.object(loop, "execute_tool", return_value={"success": True, "output": ["ok"]}),
             patch.object(loop, "get_context_summary", return_value="context"),
+            patch.object(loop, "_vector_context_text", return_value="vector context"),
+            patch.object(loop, "index_agent_history", return_value={"status": "indexed"}),
         ):
             result = loop.run_agent_loop("Stream repo tools", progress_callback=events.append)
 

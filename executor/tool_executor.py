@@ -17,6 +17,11 @@ from tools.repo import (
 )
 from tools.sandbox import SandboxViolation, audit_tool_action
 from tools.terminal import run_command
+from tools.vector_memory import (
+    index_repository,
+    retrieve_context,
+    semantic_search,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -33,6 +38,9 @@ TOOLS: dict[str, ToolFunction] = {
     "find_entrypoints": find_entrypoints,
     "find_file": find_file,
     "get_file_tree": get_file_tree,
+    "index_repository": index_repository,
+    "semantic_search": semantic_search,
+    "retrieve_context": retrieve_context,
 }
 
 
