@@ -6,6 +6,12 @@ import logging
 import traceback
 from typing import Any, Callable, Mapping
 
+from tools.dynamic_tools import (
+    DynamicToolError,
+    create_dynamic_tool,
+    list_dynamic_tools,
+    load_dynamic_tools,
+)
 from tools.filesystem import list_files, read_file, write_file
 from tools.git_autonomy import (
     autonomous_git_commit,
@@ -53,13 +59,29 @@ TOOLS: dict[str, ToolFunction] = {
     "run_git_validations": run_git_validations,
     "autonomous_git_commit": autonomous_git_commit,
     "rollback_last_autonomous_commit": rollback_last_autonomous_commit,
+    "create_dynamic_tool": create_dynamic_tool,
+    "list_dynamic_tools": list_dynamic_tools,
 }
+
+
+def refresh_dynamic_tools() -> dict[str, ToolFunction]:
+    """Load generated tools from disk into the executable registry."""
+    dynamic_tools = load_dynamic_tools()
+    TOOLS.update(dynamic_tools)
+    return dynamic_tools
 
 
 def execute_tool(tool: str, args: Mapping[str, Any] | None = None) -> dict[str, Any]:
     """Execute a tool and return a normalized result payload."""
+    refresh_dynamic_tools()
     if tool not in TOOLS:
-        result = {"success": False, "output": f"Unknown tool: {tool}"}
+        result = {
+            "success": False,
+            "output": (
+                f"Unknown tool: {tool}. If this capability is missing, use "
+                "`create_dynamic_tool` to generate a reusable Python tool in tools/generated/."
+            ),
+        }
         audit_tool_action("denied", tool, args=args, success=False, result=result)
         return result
 
@@ -77,6 +99,8 @@ def execute_tool(tool: str, args: Mapping[str, Any] | None = None) -> dict[str, 
     audit_tool_action("start", tool, args=normalized_args)
     try:
         output = TOOLS[tool](**normalized_args)
+        if tool == "create_dynamic_tool":
+            refresh_dynamic_tools()
         result = {"success": True, "output": output}
         audit_tool_action("success", tool, args=normalized_args, success=True, result=result)
         return result
@@ -92,6 +116,18 @@ def execute_tool(tool: str, args: Mapping[str, Any] | None = None) -> dict[str, 
         audit_tool_action("denied", tool, args=normalized_args, success=False, error=str(exc))
         logger.warning("Sandbox denied tool '%s': %s", tool, exc)
         return result
+    except DynamicToolError as exc:
+        result = {
+            "success": False,
+            "output": {
+                "error": str(exc),
+                "type": exc.__class__.__name__,
+                "dynamic_tool": True,
+            },
+        }
+        audit_tool_action("denied", tool, args=normalized_args, success=False, error=str(exc))
+        logger.warning("Dynamic tool denied for '%s': %s", tool, exc)
+        return result
     except Exception as exc:
         logger.exception("Error while executing tool '%s'", tool)
         result = {
@@ -106,4 +142,4 @@ def execute_tool(tool: str, args: Mapping[str, Any] | None = None) -> dict[str, 
         return result
 
 
-__all__ = ["TOOLS", "execute_tool"]
+__all__ = ["TOOLS", "execute_tool", "refresh_dynamic_tools"]

@@ -13,7 +13,9 @@ from agent.communication import (
     dequeue_agent_messages,
     enqueue_agent_message,
 )
+from executor import tool_executor
 from tools import git_autonomy
+from tools import dynamic_tools
 from tools.sandbox import SandboxViolation, audit_tool_action, validate_command
 from tools.terminal import run_command
 from agent.coder_agent import (
@@ -254,6 +256,67 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertTrue(any(message["type"] == "result" for message in history))
         self.assertTrue(any(message["type"] == "context" for message in history))
         self.assertTrue(any(event["type"] == "agent_messages_delivered" for event in events))
+
+    def test_dynamic_tool_can_be_created_loaded_and_reused(self):
+        tool_name = "test_dynamic_echo"
+        tool_file = dynamic_tools._tool_path(tool_name)
+        metadata_file = dynamic_tools._metadata_path(tool_name)
+        tool_file.unlink(missing_ok=True)
+        metadata_file.unlink(missing_ok=True)
+        tool_executor.TOOLS.pop(tool_name, None)
+        try:
+            result = tool_executor.execute_tool(
+                "create_dynamic_tool",
+                {
+                    "tool_name": tool_name,
+                    "description": "Echo a value with a prefix.",
+                    "schema": {"value": "text to echo"},
+                    "code": (
+                        "def run(value: str, prefix: str = 'echo') -> dict:\n"
+                        "    return {'message': f'{prefix}: {value}'}\n"
+                    ),
+                },
+            )
+            reused = tool_executor.execute_tool(
+                tool_name,
+                {"value": "hello", "prefix": "dynamic"},
+            )
+            listed = tool_executor.execute_tool("list_dynamic_tools", {})
+
+            self.assertTrue(result["success"])
+            self.assertTrue(reused["success"])
+            self.assertEqual(reused["output"], {"message": "dynamic: hello"})
+            self.assertIn(tool_name, {tool["tool_name"] for tool in listed["output"]})
+        finally:
+            tool_executor.TOOLS.pop(tool_name, None)
+            tool_file.unlink(missing_ok=True)
+            metadata_file.unlink(missing_ok=True)
+
+    def test_dynamic_tool_rejects_unsafe_python(self):
+        tool_name = "test_dynamic_unsafe"
+        tool_file = dynamic_tools._tool_path(tool_name)
+        metadata_file = dynamic_tools._metadata_path(tool_name)
+        tool_file.unlink(missing_ok=True)
+        metadata_file.unlink(missing_ok=True)
+        result = tool_executor.execute_tool(
+            "create_dynamic_tool",
+            {
+                "tool_name": tool_name,
+                "description": "Unsafe tool",
+                "code": "import subprocess\n\ndef run() -> str:\n    return subprocess.check_output(['pwd']).decode()\n",
+            },
+        )
+
+        self.assertFalse(result["success"])
+        self.assertIn("Import is not allowed", result["output"]["error"])
+        self.assertFalse(tool_file.exists())
+        self.assertFalse(metadata_file.exists())
+
+    def test_unknown_tool_guides_agent_to_dynamic_creation(self):
+        result = tool_executor.execute_tool("missing_capability_tool", {})
+
+        self.assertFalse(result["success"])
+        self.assertIn("create_dynamic_tool", result["output"])
 
     def test_coder_agent_contract_uses_recommended_model_and_minimal_rules(self):
         memory = loop._initial_memory("Implement feature", use_planner=True)

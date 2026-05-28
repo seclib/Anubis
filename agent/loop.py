@@ -64,6 +64,7 @@ from config import (
     MAX_STEPS as CONFIG_MAX_STEPS,
     MAX_TOOL_RETRIES,
 )
+from tools.dynamic_tools import dynamic_tool_specs
 from executor.tool_executor import execute_tool
 
 logger = logging.getLogger(__name__)
@@ -104,6 +105,13 @@ TOOL_SPECS = {
         "validation_commands": "<optional list of commands>",
     },
     "rollback_last_autonomous_commit": {"hard": False},
+    "create_dynamic_tool": {
+        "tool_name": "<new_tool_name>",
+        "description": "<what the tool does>",
+        "schema": {"arg": "<description>"},
+        "code": "def run(...):\n    ...",
+    },
+    "list_dynamic_tools": {},
     "final": {"result": "<result>"},
 }
 
@@ -115,9 +123,14 @@ def _now_iso() -> str:
 
 
 def _tool_specs_text() -> str:
+    specs = dict(TOOL_SPECS)
+    try:
+        specs.update(dynamic_tool_specs())
+    except Exception as exc:
+        logger.debug("Dynamic tool specs unavailable: %s", exc)
     return "\n".join(
         f"- {tool_name}: {json.dumps(args, ensure_ascii=False)}"
-        for tool_name, args in TOOL_SPECS.items()
+        for tool_name, args in specs.items()
     )
 
 

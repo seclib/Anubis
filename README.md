@@ -129,6 +129,14 @@ Automatic detection of:
 - Writes a persistent tool audit log to `state/tool_audit.log`
 - Applies process, CPU, memory, and file-descriptor limits in Docker Compose
 
+### 11. **Dynamic Tool Creation**
+- If a capability is missing, the agent can generate a new Python tool
+- Generated tools are saved under `tools/generated/`
+- Tools are validated with a restricted AST policy before being loaded
+- The executor reloads generated tools automatically before each call
+- Dynamic tools can be listed and reused in later agent steps
+- Unsafe imports and calls such as `subprocess`, `os`, `eval`, and `open` are rejected
+
 ## Module Responsibilities
 
 ### `agent/`
@@ -309,6 +317,10 @@ Git tools available to agents:
 - `run_git_validations`: run configured validation before committing
 - `autonomous_git_commit`: validate, stage, and commit safe changes
 - `rollback_last_autonomous_commit`: revert or hard-reset the last autonomous commit
+
+Dynamic tools available to agents:
+- `create_dynamic_tool`: save, validate, and load a reusable Python tool in `tools/generated/`
+- `list_dynamic_tools`: list generated tools currently loadable by the executor
 
 ### Connecting Open WebUI
 
