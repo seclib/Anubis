@@ -58,7 +58,6 @@ def banner_panel() -> Panel:
     right_width = max(32, max_content_width - left_width - 3)
 
     left_lines = [
-        ("Anubis Code", f"bold {CLAUDE_ORANGE}"),
         ("Welcome back.", "bold white"),
         ("", MUTED_TEXT),
         (_fit("local autonomous dev agent", left_width), MUTED_TEXT),
