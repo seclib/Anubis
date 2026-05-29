@@ -1,15 +1,7 @@
-"""
-Agent Module - Core orchestration and autonomous reasoning
+"""Agent orchestration package.
+
+Import concrete modules explicitly, for example ``agent.loop``.
+The package initializer stays side-effect free to avoid circular imports.
 """
 
-from agent.loop import run_agent_loop
-from agent.memory import load_memory, save_memory, get_task_state_summary
-from agent.prompts import SYSTEM_PROMPT
-
-__all__ = [
-    "run_agent_loop",
-    "load_memory",
-    "save_memory",
-    "get_task_state_summary",
-    "SYSTEM_PROMPT",
-]
+__all__: list[str] = []

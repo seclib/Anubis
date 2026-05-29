@@ -159,10 +159,11 @@ def append_agent_message(
     phase: str,
     metadata: dict[str, Any] | None = None,
 ) -> dict[str, Any]:
+    spec = get_agent(agent_name)   # un seul lookup
     event = {
         "agent": agent_name,
-        "role": get_agent(agent_name).role,
-        "model": get_agent(agent_name).model,
+        "role": spec.role,
+        "model": spec.model,
         "phase": phase,
         "message": message,
     }

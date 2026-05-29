@@ -1,11 +1,10 @@
-
 services:
 
   # =========================
-  # 🧠 QDRANT (RAG MEMORY)
+  # 🧠 QDRANT (AUTO-HEALING VECTOR DB)
   # =========================
   qdrant:
-    image: qdrant/qdrant:latest
+    image: qdrant/qdrant:v1.11.5
     container_name: qdrant
     restart: unless-stopped
 
@@ -18,13 +17,28 @@ services:
     networks:
       - anubis-net
 
+    # 🧠 AUTO-HEALING STRATEGY
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333'"]
+      interval: 10s
+      timeout: 3s
+      retries: 10
+      start_period: 10s
+
+    deploy:
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 10
+        window: 120s
+
 
   # =========================
   # 🤖 ANUBIS AGENT
   # =========================
   anubis-agent:
     command: uvicorn app.main:app --host 0.0.0.0 --port 8000
-    
+
     build:
       context: .
       args:
@@ -39,44 +53,58 @@ services:
 
     user: "${UID:-1000}:${GID:-1000}"
 
-    pids_limit: ${ANUBIS_PIDS_LIMIT:-256}
-    mem_limit: ${ANUBIS_MEMORY_LIMIT:-2g}
-    cpus: ${ANUBIS_CPUS:-2}
+    mem_limit: 2g
+    cpus: 2
 
     environment:
 
+      # 🌐 API
       API_HOST: 0.0.0.0
       API_PORT: 8000
       API_BASE_PATH: /v1
 
-      # 🧠 OLLAMA LOCAL HOST
+      # 🧠 OLLAMA (LOCAL)
       OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_MODEL: qwen2.5-coder:7b
+      OLLAMA_FALLBACK_MODEL: qwen2.5-coder:7b
+      OLLAMA_NUM_CTX: 8192
+      OLLAMA_KEEP_ALIVE: 1h
+      ORCHESTRATOR_AGENT_MODEL: qwen2.5-coder:7b
+      PLANNER_AGENT_MODEL: qwen2.5-coder:7b
+      CODER_AGENT_MODEL: qwen2.5-coder:7b
+      REVIEWER_AGENT_MODEL: qwen2.5-coder:7b
+      TESTER_AGENT_MODEL: qwen2.5-coder:7b
+      DEBUGGER_AGENT_MODEL: qwen2.5-coder:7b
+      MEMORY_AGENT_MODEL: qwen2.5-coder:7b
+      LLM_TEMPERATURE: 0.2
+      LLM_MAX_TOKENS: 4096
 
-      OLLAMA_MODEL: mistral
-      EMBEDDING_MODEL: bge-m3
-
-      # 🧠 HERMES MEMORY
+      # 🔥 MEMORY (QDRANT RESILIENT MODE)
       HERMES_MEMORY_ENABLED: "true"
       HERMES_MEMORY_BACKEND: qdrant
       QDRANT_URL: http://qdrant:6333
       QDRANT_COLLECTION: hermes_memory
 
+      # 🧠 fallback local memory (IMPORTANT FOR HEALING)
       HERMES_MEMORY_FILE: /workspace/state/hermes_memory.json
+
+      # ⚡ resilience tuning
+      QDRANT_RETRY_ATTEMPTS: 20
+      QDRANT_RETRY_DELAY: 2
+
+      CONTINUOUS_RUN: "false"
+      AUTO_GIT_COMMIT_ENABLED: "true"
 
       # 📚 OBSIDIAN
       OBSIDIAN_VAULT_PATH: /obsidian
       OBSIDIAN_DAILY_MEMORY_DIR: memories
 
-      CONTINUOUS_RUN: "true"
-      AUTO_GIT_COMMIT_ENABLED: "true"
-
+      # 📁 PATHS
       PROJECT_ROOT: /workspace
       WORKSPACE_ROOT: /workspace
 
     volumes:
       - anubis-workspace:/workspace
-
-      # ⚠️ adapte le chemin si besoin
       - /home/fatsio/ObsidianVault:/obsidian:rw
 
     working_dir: /workspace
@@ -88,18 +116,24 @@ services:
       - host.docker.internal:host-gateway
 
     depends_on:
-      - qdrant
+      qdrant:
+        condition: service_started
 
     networks:
       - anubis-net
 
 
+# =========================
+# 💾 VOLUMES
+# =========================
 volumes:
   anubis-workspace:
   qdrant_data:
 
 
+# =========================
+# 🌐 NETWORK
+# =========================
 networks:
   anubis-net:
     driver: bridge
-

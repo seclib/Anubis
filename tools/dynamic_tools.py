@@ -5,9 +5,12 @@ from __future__ import annotations
 import ast
 import importlib.util
 import json
+import logging
 import re
 from pathlib import Path
 from typing import Any, Callable
+
+logger = logging.getLogger(__name__)
 
 from tools.sandbox import relative_to_workspace, resolve_workspace_path
 
@@ -204,9 +207,11 @@ def load_dynamic_tools() -> dict[str, ToolCallable]:
         tool_name = path.stem
         try:
             _validate_tool_name(tool_name)
-            _validate_code(path.read_text())
+            code = path.read_text()   # lire une fois, valider et charger le même contenu
+            _validate_code(code)
             tools[tool_name] = _load_tool_callable(tool_name, path)
-        except DynamicToolError:
+        except Exception:             # attraper ImportError, AttributeError, etc.
+            logger.debug("Failed to load dynamic tool '%s'", tool_name, exc_info=True)
             continue
     return tools
 

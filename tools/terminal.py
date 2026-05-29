@@ -1,7 +1,10 @@
+import logging
 import subprocess
 from typing import Any, Dict
 
 from tools.sandbox import secure_command_options, validate_command
+
+logger = logging.getLogger(__name__)
 
 
 def _trim_output(value: str, limit: int) -> tuple[str, bool]:
@@ -11,12 +14,13 @@ def _trim_output(value: str, limit: int) -> tuple[str, bool]:
 
 
 def run_command(cmd: str) -> Dict[str, Any]:
-    validate_command(cmd)
+    # validate_command retourne la liste de tokens validés
+    tokens = validate_command(cmd)
     options = secure_command_options()
     try:
         result = subprocess.run(
-            cmd,
-            shell=True,
+            tokens,       # liste de tokens — pas de shell=True
+            shell=False,  # cohérent avec la validation sandbox
             capture_output=True,
             text=True,
             cwd=options["cwd"],
@@ -32,6 +36,7 @@ def run_command(cmd: str) -> Dict[str, Any]:
         max_output_chars = int(options["max_output_chars"])
         stdout, stdout_truncated = _trim_output(str(stdout), max_output_chars)
         stderr, stderr_truncated = _trim_output(str(stderr), max_output_chars)
+        logger.warning("Command timed out after %ss: %s", options["timeout"], cmd)
         return {
             "stdout": stdout,
             "stderr": stderr,
@@ -52,3 +57,4 @@ def run_command(cmd: str) -> Dict[str, Any]:
         "timeout": False,
         "truncated": stdout_truncated or stderr_truncated,
     }
+

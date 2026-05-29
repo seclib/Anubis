@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from agent.vector_memory import (
+from memory.vector import (
     index_repository as _index_repository,
     retrieve_context as _retrieve_context,
     semantic_search as _semantic_search,

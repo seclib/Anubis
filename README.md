@@ -1,489 +1,505 @@
-# Anubis - Autonomous Development Agent
+# Anubis
 
-A fully autonomous AI development agent that runs locally with **Ollama**, executing tools autonomously through a state machine reasoning loop.
+Agent CLI autonome local inspire des systemes type Claude Code, Hermes CLI et OpenDevin.
 
-## Architecture
+Anubis execute des taches de developpement avec Ollama, une boucle agent, des tools Linux, une memoire locale, une API compatible OpenAI et une interface terminal interactive.
 
-```
-anubis-agent/
-├── app/                # FastAPI OpenAI-compatible API
-│   ├── __init__.py
-│   └── main.py         # FastAPI app + Open WebUI compatibility
-├── agent/               # Core orchestration & reasoning
-│   ├── __init__.py
-│   ├── loop.py         # State machine + main agent loop
-│   ├── memory.py       # Persistent state & learning
-│   ├── multi_agent.py  # Multi-agent roles, prompts, and Ollama model routing
-│   ├── parser.py       # JSON action parser
-│   ├── planner.py      # Task planning
-│   └── prompts.py      # System prompts
-├── llm/                # Language model interface
-│   ├── __init__.py
-│   └── ollama.py       # Ollama integration
-├── tools/              # System tools
-│   ├── __init__.py
-│   ├── filesystem.py   # File operations
-│   ├── terminal.py     # Command execution
-│   └── repo.py         # Repository introspection
-├── executor/           # Tool execution engine
-│   ├── __init__.py
-│   └── tool_executor.py# Execution + auto-retry + error correction
-├── state/              # Persistent state
-│   └── runtime.json    # Agent state & memory
-├── Dockerfile
+Le projet est en phase de stabilisation architecture. La priorite actuelle est la robustesse, pas l'ajout de nouvelles fonctionnalites.
+
+## Objectifs
+
+- Executer localement avec Ollama, sans dependance cloud obligatoire.
+- Fournir un agent CLI capable de lire, modifier, tester et analyser un projet.
+- Garder une architecture maintenable : agent, tools, executor, memory et LLM doivent rester separes.
+- Eviter les circular imports et les dependances bidirectionnelles.
+- Garantir qu'une execution agent retourne toujours une reponse finale utilisateur.
+- Preparer un systeme extensible avec plugins, multi-agents et streaming propre.
+
+## Etat Actuel
+
+Anubis contient deja :
+
+- une boucle agent autonome dans `agent/loop.py`
+- une integration Ollama dans `llm/ollama.py`
+- un executor de tools dans `executor/tool_executor.py`
+- des tools filesystem, shell, git, repo, memoire et developpement autonome
+- une memoire courte/longue dans `memory/`
+- une API FastAPI compatible OpenAI dans `app/main.py`
+- une API HTTP alternative dans `api/openai_server.py`
+- une interface CLI riche dans `anubis_cli.py`
+- un mode Docker avec Qdrant optionnel
+- un jeu de tests d'autonomie dans `tests/test_loop_autonomy.py`
+
+Point important : le projet n'a pas actuellement de circular imports critiques detectes entre les couches principales. Le risque principal est plutot la concentration de responsabilites dans certains modules, surtout `agent/loop.py` et `anubis_cli.py`.
+
+## Architecture Actuelle
+
+```text
+.
+├── agent/
+│   ├── loop.py              # boucle agent principale
+│   ├── dependencies.py      # injection de dependances
+│   ├── prompts.py           # prompts systeme
+│   ├── parser.py            # parsing des actions JSON
+│   ├── planner.py           # planification simple
+│   ├── multi_agent.py       # profils agents et routage multi-agent
+│   ├── orchestrator_agent.py
+│   ├── coder_agent.py
+│   ├── reviewer_agent.py
+│   ├── tester_agent.py
+│   └── debugger_agent.py
+├── app/
+│   └── main.py              # API FastAPI
+├── api/
+│   └── openai_server.py     # serveur OpenAI-compatible alternatif
+├── core/
+│   └── workspace.py         # securisation des chemins workspace
+├── executor/
+│   └── tool_executor.py     # execution et registre des tools
+├── llm/
+│   └── ollama.py            # appels Ollama /api/chat
+├── memory/
+│   ├── state.py             # memoire runtime JSON
+│   ├── hermes.py            # memoire long terme
+│   └── vector.py            # memoire vectorielle
+├── tools/
+│   ├── filesystem.py
+│   ├── terminal.py
+│   ├── repo.py
+│   ├── sandbox.py
+│   ├── git_autonomy.py
+│   ├── dynamic_tools.py
+│   └── autonomous_developer.py
+├── tests/
+│   └── test_loop_autonomy.py
+├── anubis_cli.py            # terminal interactif
+├── main.py                  # entree CLI/API historique
+├── config.py                # configuration centrale
 ├── docker-compose.yml
-├── requirements.txt
-├── main.py            # Legacy CLI entry point
-├── config.py          # Configuration
-└── README.md          # This file
+└── requirements.txt
 ```
 
-## Key Features
+## Regles D'Architecture
 
-### 1. **Autonomous Reasoning Loop**
-- **INIT** → **PLAN** → **EXECUTE** → **VERIFY** → **FIX** → **COMPLETE**
-- Continuous execution without human intervention
-- State-machine driven decision making
+Ces regles doivent rester vraies pour garder Anubis maintenable.
 
-### 2. **Global Agent Rules (GARs)**
-The agent MUST ALWAYS:
-1. **Always try to solve the task** → Choose the safest available tool action and execute it
-2. **Never ask for human help** → Do not request confirmation, clarification, or manual intervention
-3. **Observe result** → Capture output, success/failure, errors
-4. **Correct its own errors** → Analyze failures, change arguments, retry, and switch strategy
-5. **Continue until success or total blockage** → Exhaust retries and alternatives before blocking
-6. **Own the outcome** → Responsible for final task success
-
-### 3. **Automatic Error Recovery**
-- Tool failures trigger LLM correction
-- Up to 3 retry attempts per tool
-- Automatic argument refinement based on error messages
-
-### 4. **Autonomous Multi-Agent System**
-Anubis runs a collaborative team of specialized agents:
-
-- `orchestrator_agent`: main brain; receives the user task, distributes work, coordinates steps, aggregates results, and manages retries/priorities
-- `planner_agent`: decomposes work into concrete execution steps
-- `coder_agent`: modifies code, creates files, refactors, and implements features with minimal clean changes; recommended model `deepseek-coder-v2`
-- `reviewer_agent`: acts as a critical senior engineer; reviews generated code, detects potential bugs, verifies architecture quality, and proposes improvements
-- `tester_agent`: executes tests, runs validation commands, detects runtime errors, analyzes shell output, and returns structured validation reports
-- `debugger_agent`: autonomously analyzes stack traces, identifies probable causes, proposes corrections, and reruns fixes
-- `memory_agent`: summarizes collaboration and keeps shared context compact
-
-Each agent has:
-- a dedicated role
-- a specialized prompt
-- a dedicated Ollama model configured by environment variable
-
-The agents collaborate through shared runtime memory (`agent_messages` and `collaboration_summary`) and emit live events during streaming.
-They also communicate through an internal structured bus:
-- FIFO priority queue for agent-to-agent tasks, results, context, coordination, status, and errors
-- per-agent inbox delivery before each specialized agent call
-- communication history persisted in runtime memory
-- orchestrator assignments automatically become queued tasks
-- agent results and context are shared back to the orchestrator and team
-
-The orchestrator also runs a priority engine:
-- decomposes complex plans into dependency-aware steps
-- boosts critical work such as security, debugging, validation, and implementation
-- stores a dependency graph and critical path
-- groups independent read/review/test/memory steps into parallelizable batches
-- routes each step to the best specialized agent based on phase/tool hints
-
-### 5. **Task Validation**
-Before completion, the agent validates:
-- ✓ All created files exist
-- ✓ All commands succeeded
-- ✓ Task objective is truly achieved
-- If validation fails → Agent continues fixing
-
-### 6. **Memory & Learning**
-- Goal tracking
-- Step success rate
-- Failure history
-- Action replay log
-- Compact state summaries for LLM
-- Multi-agent collaboration transcript and summary
-- Inter-agent communication queue, inboxes, and history
-- Continuous improvement metrics, recurring failures, and prompt guidance
-
-### 7. **Local Vector Memory / Repository RAG**
-- Indexes repository files into a local vector store
-- Supports semantic search over code and documentation
-- Retrieves relevant context for analysis, coding, review, and debugging prompts
-- Indexes agent action history for cross-agent recall
-- Uses Ollama embeddings with `bge-m3` by default; `nomic-embed-text` is also supported
-- Stores vectors locally in `state/vector_store.json`
-
-### 8. **Hermes Long-Term Memory**
-- Searches long-term memory before analysis, action, validation, and correction
-- Stores compact interaction summaries in `state/hermes_memory.json`
-- Mirrors useful memories into markdown notes inside the configured Obsidian vault
-- Appends concise post-interaction summaries to `memories/YYYY-MM-DD.md`
-- Indexes Obsidian notes into vector memory for semantic recall
-- Optionally mirrors Hermes vectors to Qdrant when `HERMES_MEMORY_BACKEND=qdrant`
-- Retrieves JSON memory, Obsidian notes, and vector matches together
-- Prioritizes recent and consistent memories when context overlaps
-
-### 9. **Project Introspection**
-Automatic detection of:
-- Project type (Node, Python, Docker, Go, Rust, Java)
-- Framework (React, Vue, Django, Flask, FastAPI, etc.)
-- Entry points (main files, scripts, Dockerfile)
-
-### 10. **Autonomous Git System**
-- Runs validation commands before creating commits
-- Creates an automatic commit after successful task verification
-- Generates a deterministic commit message from the task and changed files
-- Supports optional temporary branches for isolated autonomous runs
-- Records commit history locally and can rollback the last autonomous commit
-- Aborts commits when validation fails to avoid committing broken work
-
-### 11. **Docker Sandbox Hardening**
-- Runs as a non-root user with all Linux capabilities dropped
-- Uses a read-only container root filesystem plus small `noexec` tmpfs mounts
-- Keeps `/workspace` in an isolated Docker volume by default, not a host bind mount
-- Enforces shell command timeouts, output caps, path validation, and forbidden command checks
-- Writes a persistent tool audit log to `state/tool_audit.log`
-- Applies process, CPU, memory, and file-descriptor limits in Docker Compose
-
-### 12. **Dynamic Tool Creation**
-- If a capability is missing, the agent can generate a new Python tool
-- Generated tools are saved under `tools/generated/`
-- Tools are validated with a restricted AST policy before being loaded
-- The executor reloads generated tools automatically before each call
-- Dynamic tools can be listed and reused in later agent steps
-- Unsafe imports and calls such as `subprocess`, `os`, `eval`, and `open` are rejected
-
-### 13. **Continuous Improvement Mode**
-- Analyzes tool success rate, failed tools, no-progress cycles, and recurrent errors
-- Stores self-improvement state in runtime memory
-- Injects strategy improvements into analysis, action, review, and correction prompts
-- Recommends safer tool strategies such as inspecting paths before `read_file`
-- Emits live `self_improvement` progress events during autonomous runs
-- Optimizes future behavior without changing code unless a normal tool/action does it explicitly
-
-### 14. **Autonomous Developer Mode**
-- Detects the active project workflow and chooses install, build, test, and server commands
-- Can create a minimal Python or FastAPI project scaffold inside the workspace
-- Installs dependencies with sandbox-validated commands when a dependency file exists
-- Runs build/compile checks and test suites with structured stdout/stderr/code results
-- Starts and tracks local app servers with logs under `state/dev_servers/`
-- Stops tracked servers safely and records server metadata for later cleanup
-- Provides an autonomy plan that keeps retrying through debugger/coder/tester cycles until success or total blockage
-
-## Module Responsibilities
-
-### `agent/`
-- **loop.py**: Main execution loop, state transitions
-- **memory.py**: Persistent memory with statistics
-- **prompts.py**: System prompts for LLM
-- **parser.py**: JSON action parsing
-- **planner.py**: Task decomposition
-
-### `llm/`
-- **ollama.py**: Ollama API integration (local, no API keys)
-
-### `tools/`
-- **filesystem.py**: read_file, write_file, list_files
-- **terminal.py**: run_command (bash/shell execution)
-- **repo.py**: scan_full_repo, detect_project_type, detect_framework, detect_entrypoints
-
-### `executor/`
-- **tool_executor.py**: Execution engine with auto-retry, error detection, LLM correction
-
-### `state/`
-- **runtime.json**: Agent state, task history, completion status
-
-## How It Works
-
-```
-User provides task
-        ↓
-agent/loop.py runs autonomous loop
-        ↓
-LLM decides next action (plan/act/fix/final)
-        ↓
-executor/ executes tool if "act" or "fix"
-        ↓
-Tool fails? → LLM proposes correction → Retry automatically
-        ↓
-Tool succeeds? → Validate result
-        ↓
-Validation passes? → Go to next step or complete
-        ↓
-Validation fails? → Request fix → Continue loop
-        ↓
-Task complete or max steps reached
+```text
+CLI/API        -> agent runtime
+agent          -> llm, executor, memory, core
+executor       -> tools, core
+tools          -> core uniquement
+memory         -> core uniquement
+llm            -> core/config uniquement
+core           -> aucune couche domaine
 ```
 
-## Configuration
+Interdictions :
 
-Set environment variables to customize behavior:
+- `tools` ne doit jamais importer `agent`.
+- `executor` ne doit jamais importer `agent`.
+- `memory` ne doit jamais importer `agent`, `executor` ou `tools`.
+- `llm` ne doit pas stocker d'etat conversationnel.
+- `cli` ne doit pas contenir de logique de raisonnement agent.
+- un tool ne doit pas appeler directement un autre tool via l'agent.
+- toute execution tool doit passer par l'executor.
+- toute sortie utilisateur finale doit passer par la boucle/finalisation agent.
+
+## Architecture Cible
+
+La cible de stabilisation est une architecture plus proche d'un produit agent local.
+
+```text
+anubis/
+├── core/
+│   ├── config.py
+│   ├── events.py
+│   ├── errors.py
+│   ├── logging.py
+│   └── workspace.py
+├── runtime/
+│   ├── container.py
+│   └── dependencies.py
+├── agent/
+│   ├── loop.py
+│   ├── state.py
+│   ├── router.py
+│   ├── planner.py
+│   ├── reflector.py
+│   ├── finalizer.py
+│   ├── safeguards.py
+│   └── prompts/
+├── orchestrator/
+│   ├── orchestrator.py
+│   ├── agent_registry.py
+│   ├── model_policy.py
+│   └── task_graph.py
+├── executor/
+│   ├── executor.py
+│   ├── registry.py
+│   ├── schemas.py
+│   └── permissions.py
+├── tools/
+├── memory/
+│   ├── short_term.py
+│   ├── long_term.py
+│   ├── vector.py
+│   ├── compaction.py
+│   └── schemas.py
+├── llm/
+│   ├── ollama.py
+│   ├── messages.py
+│   ├── model_registry.py
+│   └── streaming.py
+├── plugins/
+│   ├── loader.py
+│   ├── manifest.py
+│   └── sandbox.py
+├── cli/
+│   ├── main.py
+│   ├── renderer.py
+│   ├── commands.py
+│   ├── session.py
+│   └── streaming.py
+└── api/
+    ├── routes.py
+    ├── schemas.py
+    └── stream.py
+```
+
+## Boucle Agent Recommandee
+
+```text
+user input
+  -> observe
+  -> route
+  -> plan if needed
+  -> act with tools if needed
+  -> reflect
+  -> finalize
+  -> user response
+```
+
+Invariant de production :
+
+> Une execution agent doit toujours atteindre une etape `finalize`, meme si un tool echoue, si Ollama retourne une reponse invalide, si la memoire est indisponible ou si la limite de steps est atteinte.
+
+Les safeguards attendus :
+
+- `MAX_STEPS`
+- `MAX_RETRIES`
+- `MAX_TOOL_RETRIES`
+- timeout par commande shell
+- limite de taille stdout/stderr
+- detection de non-progres
+- reponse finale obligatoire
+- erreurs structurees et journalisees
+
+## Installation Locale
+
+### 1. Prerequis
+
+- Linux
+- Python 3.10+
+- Ollama
+- Git
+- Docker optionnel
+
+### 2. Installer les dependances Python
 
 ```bash
-# LLM
-export OLLAMA_BASE_URL="http://localhost:11434"
-export OLLAMA_MODEL="mistral"          # or llama2, neural-chat, etc.
-export LLM_TEMPERATURE="0.7"
-export LLM_MAX_TOKENS="2000"
-export PROJECT_ROOT="$(pwd)"           # Workspace root
-export EMBEDDING_MODEL="bge-m3"         # or nomic-embed-text
-export VECTOR_STORE_FILE="state/vector_store.json"
-export HERMES_MEMORY_ENABLED="true"
-export HERMES_MEMORY_BACKEND="local"    # or qdrant
-export HERMES_MEMORY_FILE="state/hermes_memory.json"
-export OBSIDIAN_VAULT_PATH="state/obsidian_vault"
-export OBSIDIAN_DAILY_MEMORY_DIR="memories"
-export QDRANT_URL="http://localhost:6333"
-export QDRANT_COLLECTION="hermes_memory"
-
-# Multi-agent Ollama models
-export ORCHESTRATOR_AGENT_MODEL="$OLLAMA_MODEL"
-export PLANNER_AGENT_MODEL="$OLLAMA_MODEL"
-export CODER_AGENT_MODEL="deepseek-coder-v2"
-export REVIEWER_AGENT_MODEL="$OLLAMA_MODEL"
-export TESTER_AGENT_MODEL="$OLLAMA_MODEL"
-export DEBUGGER_AGENT_MODEL="qwen2.5-coder"
-export MEMORY_AGENT_MODEL="$OLLAMA_MODEL"
-
-# Agent behavior
-export MAX_STEPS="30"                  # Max loop iterations
-export MAX_RETRIES="3"                 # Retry attempts per tool
-export MAX_TOOL_RETRIES="3"           # Tool executor retries
-export CONTINUOUS_RUN="true"          # Always run without interruption
-export TOOL_COMMAND_TIMEOUT="120"     # Shell command timeout in seconds
-export TOOL_COMMAND_MAX_LENGTH="4000" # Max accepted command length
-export TOOL_OUTPUT_MAX_CHARS="20000"  # Max captured stdout/stderr chars
-export TOOL_AUDIT_FILE="state/tool_audit.log"
-
-# Autonomous Git
-export AUTO_GIT_COMMIT_ENABLED="true" # Commit automatically after verified success
-export GIT_VALIDATION_COMMANDS="python3 -m unittest discover -s tests"
-export GIT_USE_TEMP_BRANCH="false"    # Set true to commit on temporary branches
-export GIT_TEMP_BRANCH_PREFIX="anubis/auto"
-
-# OpenAI-compatible API
-export API_HOST="127.0.0.1"
-export API_PORT="8000"
-export API_BASE_PATH="/v1"
-export API_AUTH_REQUIRED="false"
-export API_MODEL_ID="claude-code-local"
-export API_MODEL_NAME="Claude Code Local Agent"
-export API_KEY=""                     # Optional
-
-# Debugging
-export LOG_LEVEL="INFO"                # DEBUG, INFO, WARNING, ERROR
-export DEBUG="false"
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -r requirements.txt
 ```
 
-## Usage
+### 3. Installer le modele Ollama recommande
 
-### Running the Agent
+```bash
+ollama pull qwen2.5-coder:7b
+ollama pull bge-m3
+```
+
+Demarrer Ollama si necessaire :
+
+```bash
+ollama serve
+```
+
+### 4. Configurer l'environnement
+
+```bash
+cp .env.example .env
+```
+
+Configuration minimale :
+
+```bash
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5-coder:7b
+OLLAMA_FALLBACK_MODEL=qwen2.5-coder:7b
+PROJECT_ROOT=.
+WORKSPACE_ROOT=.
+```
+
+## Lancer Anubis
+
+### Terminal interactif
+
+```bash
+python3 anubis_cli.py
+```
+
+Commandes utiles dans le terminal :
+
+```text
+/help                 afficher les commandes
+/run <tache>          lancer la boucle agent autonome
+/exec <commande>      executer une commande shell controlee
+/status              afficher l'etat memoire
+/clear               vider le contexte CLI
+/exit                quitter
+```
+
+### Agent depuis Python
 
 ```python
-from agent import run_agent_loop
+from agent.loop import run_agent_loop
 
-task = "Create a Python script that calculates Fibonacci numbers"
-result = run_agent_loop(task)
+result = run_agent_loop("Analyse le projet et propose les priorites de refactor")
 print(result)
 ```
 
-### Running the OpenAI-Compatible API
+### API locale
 
 ```bash
 python3 main.py serve
 ```
 
-This starts the FastAPI backend at:
+Endpoint par defaut :
 
 ```text
 http://localhost:8000/v1
 ```
 
-Implemented endpoints:
-- `GET /v1/models`
-- `GET /v1/models/{model_id}`
-- `POST /v1/chat/completions`
-- `POST /v1/agent/stream`
-- `GET /health`
+Endpoints principaux :
 
-`API_BASE_PATH` can be changed if you want Open WebUI to point at a custom base URL path, for example `/openai/v1`.
-`API_AUTH_REQUIRED` defaults to `false`, so Open WebUI can connect without any API key.
+```text
+GET  /v1/models
+GET  /v1/models/{model_id}
+POST /v1/chat/completions
+POST /v1/agent/stream
+GET  /health
+```
 
-Streaming is supported on `POST /v1/chat/completions` with `stream=true`.
-Open WebUI can therefore display live agent progress, including:
-- active agent and delegated phase
-- planning steps
-- tool execution start/result/error
-- shell stdout/stderr, exit code, timeout, and truncation status
-- retry / auto-correction events
-- intermediate verification results
-
-This makes Open WebUI behave like a Cursor / Claude Code style live execution interface when the selected model is used with streaming enabled.
-
-For custom UIs, use the native structured stream:
+Exemple de stream agent :
 
 ```bash
 curl -N http://localhost:8000/v1/agent/stream \
   -H "Content-Type: application/json" \
-  -d '{"task":"Inspect the repository and summarize the entrypoints"}'
+  -d '{"task":"Inspecte le projet et resume les points d entree"}'
 ```
 
-This endpoint returns Server-Sent Events:
-- `agent_progress`: state, active agent, selected action, plan, tool start/result/error, shell logs, auto-corrections, verification
-- `agent_result`: final agent result
-- `agent_error`: execution error
-- `agent_done`: stream closed cleanly
-
-Each `agent_progress` event includes a `live` object optimized for live execution UIs:
-
-```json
-{
-  "active_agent": "tester_agent",
-  "phase": "validation",
-  "tool": "run_command",
-  "shell": {"stdout": "...", "stderr": "...", "code": 0},
-  "progress": {"state": "EXECUTE", "cycle": 1, "step": 2}
-}
-```
-
-RAG tools available to agents:
-- `index_repository`: refresh the local vector index
-- `semantic_search`: search indexed repository and agent history semantically
-- `retrieve_context`: return prompt-ready relevant context
-
-Git tools available to agents:
-- `git_status`: inspect branch and working-tree changes
-- `generate_commit_message`: produce an intelligent commit message
-- `run_git_validations`: run configured validation before committing
-- `autonomous_git_commit`: validate, stage, and commit safe changes
-- `rollback_last_autonomous_commit`: revert or hard-reset the last autonomous commit
-
-Dynamic tools available to agents:
-- `create_dynamic_tool`: save, validate, and load a reusable Python tool in `tools/generated/`
-- `list_dynamic_tools`: list generated tools currently loadable by the executor
-
-Autonomous developer tools available to agents:
-- `developer_project_status`: detect project type and workflow commands
-- `developer_autonomy_plan`: create the install/build/test/server execution plan
-- `create_project_scaffold`: create a minimal Python or FastAPI project
-- `install_project_dependencies`: run dependency installation
-- `run_project_build`: run build or compile validation
-- `run_project_tests`: run tests and return structured errors
-- `start_project_server`: launch a tracked server process
-- `stop_project_server`: stop a tracked server process
-
-Hermes memory tools available to agents:
-- `search_hermes_memory`: retrieve JSON memory, Obsidian notes, and vector matches
-- `index_obsidian_vault`: index markdown notes from the configured vault
-- `store_hermes_memory`: persist compact facts, lessons, and outcomes
-- `write_obsidian_note`: write a markdown note into the vault
-- `append_daily_memory_summary`: append concise memory summaries to `memories/YYYY-MM-DD.md`
-
-### Connecting Open WebUI
-
-With Docker Compose, Open WebUI is started and preconfigured automatically:
+### Docker
 
 ```bash
 docker compose up --build
 ```
 
-Open the UI at:
+Le compose lance :
+
+- `anubis-agent` sur `http://localhost:8000/v1`
+- `qdrant` sur `http://localhost:6333`
+
+Dans Docker, Anubis contacte Ollama via :
 
 ```text
-http://localhost:3000
+http://host.docker.internal:11434
 ```
 
-The bundled Open WebUI service is configured in OpenAI-compatible mode with:
-- Base URL inside Docker: `http://anubis-agent:8000/v1`
-- Browser/host Base URL: `http://localhost:8000/v1`
-- API key: `ignored`
-- Model: `claude-code-local`
+## Configuration Principale
 
-If you configure an existing Open WebUI manually:
+Variables importantes :
 
-1. Go to `Admin Settings`
-2. Open `Connections > OpenAI > Manage`
-3. Add a new `Standard / Compatible` connection
-4. Set `API URL` to `http://localhost:8000/v1` or your custom `API_BASE_PATH`
-5. Set `API Key` to `ignored` unless you explicitly enable `API_AUTH_REQUIRED=true`
-6. Save, then select the model `claude-code-local`
+```bash
+# Ollama
+OLLAMA_BASE_URL=http://localhost:11434
+OLLAMA_MODEL=qwen2.5-coder:7b
+OLLAMA_FALLBACK_MODEL=qwen2.5-coder:7b
+OLLAMA_NUM_CTX=8192
+OLLAMA_KEEP_ALIVE=1h
+LLM_TEMPERATURE=0.2
+LLM_MAX_TOKENS=4096
 
-If Open WebUI runs in Docker, use:
+# Agents
+ORCHESTRATOR_AGENT_MODEL=$OLLAMA_MODEL
+PLANNER_AGENT_MODEL=$OLLAMA_MODEL
+CODER_AGENT_MODEL=$OLLAMA_MODEL
+REVIEWER_AGENT_MODEL=$OLLAMA_MODEL
+TESTER_AGENT_MODEL=$OLLAMA_MODEL
+DEBUGGER_AGENT_MODEL=$OLLAMA_MODEL
+MEMORY_AGENT_MODEL=$OLLAMA_MODEL
+
+# Loop
+MAX_STEPS=30
+MAX_RETRIES=3
+MAX_TOOL_RETRIES=3
+CONTINUOUS_RUN=false
+
+# Tools
+TOOL_COMMAND_TIMEOUT=120
+TOOL_COMMAND_MAX_LENGTH=4000
+TOOL_OUTPUT_MAX_CHARS=20000
+TOOL_AUDIT_FILE=state/tool_audit.log
+
+# Memory
+HERMES_MEMORY_ENABLED=true
+HERMES_MEMORY_BACKEND=local
+HERMES_MEMORY_FILE=state/hermes_memory.json
+EMBEDDING_MODEL=bge-m3
+VECTOR_STORE_FILE=state/vector_store.json
+
+# API
+API_HOST=127.0.0.1
+API_PORT=8000
+API_BASE_PATH=/v1
+API_AUTH_REQUIRED=false
+API_MODEL_ID=claude-code-local
+```
+
+## Tools Disponibles
+
+Familles de tools :
+
+- filesystem : lire, ecrire, lister des fichiers
+- terminal : executer des commandes shell controlees
+- repo : introspection projet, detection frameworks, entrypoints
+- git : status, validations, commit autonome, rollback
+- vector memory : indexation repo et recherche semantique
+- Hermes memory : stockage et recherche memoire long terme
+- dynamic tools : creation et chargement de tools Python controles
+- autonomous developer : build, tests, serveurs locaux, scaffolding
+
+Tous les tools doivent rester atomiques, testables et sans dependance vers `agent`.
+
+## Memoire
+
+Anubis utilise plusieurs niveaux de memoire :
+
+- `state/runtime.json` : etat runtime, historique, progression
+- `state/hermes_memory.json` : memoire long terme locale
+- `state/vector_store.json` : index vectoriel local
+- Qdrant optionnel via `HERMES_MEMORY_BACKEND=qdrant`
+- Obsidian optionnel via `OBSIDIAN_VAULT_PATH`
+
+Regles de stabilite :
+
+- les messages doivent toujours avoir un format clair `role/content`
+- la memoire ne doit pas contenir de logique agent
+- la compaction doit eviter les contextes trop longs
+- les erreurs memoire ne doivent jamais bloquer la reponse finale
+
+## Observabilite
+
+Fichiers utiles :
 
 ```text
-http://anubis-agent:8000/v1
+state/cli.log
+state/tool_audit.log
+state/runtime.json
 ```
 
-## Docker
+Bonnes pratiques attendues :
 
-Build and run the containerized agent:
+- logs structures par run agent
+- events de streaming typables
+- audit de chaque tool call
+- distinction claire entre erreur tool, erreur LLM, erreur memory et erreur loop
+- conservation d'un `run_id`, `step_id` et `tool_call_id`
+
+## Tests Et Verification
+
+Lancer les tests :
 
 ```bash
-docker compose up --build
+python3 -m unittest tests/test_loop_autonomy.py
 ```
 
-The container:
-- uses an isolated Docker volume at `/workspace` by default
-- seeds `/workspace` from the image on first start
-- initializes an isolated Git repository snapshot when `INIT_WORKSPACE_GIT=true`
-- uses `/workspace` as the project root
-- reaches Ollama through `http://host.docker.internal:11434`
-- exposes the OpenAI-compatible API on `http://localhost:8000/v1`
-- exposes Open WebUI on `http://localhost:3000`
-- supports Open WebUI streaming via `stream=true`
-- allows changing the API path with `API_BASE_PATH`
-- keeps auth disabled unless `API_AUTH_REQUIRED=true`
-- runs with `read_only: true`, `cap_drop: ALL`, `no-new-privileges`, `pids_limit`, CPU/memory limits, and `noexec` tmpfs mounts
-- records every tool action in `state/tool_audit.log`
-
-If your local UID/GID is not `1000`, export `UID` and `GID` before building so the workspace volume stays writable.
-
-To inspect or export the isolated workspace:
+Verifier les imports Python :
 
 ```bash
-docker compose exec anubis-agent git status --short
-docker compose cp anubis-agent:/workspace ./anubis-workspace-export
+python3 -m py_compile \
+  config.py \
+  llm/ollama.py \
+  agent/prompts.py \
+  agent/loop.py \
+  executor/tool_executor.py \
+  anubis_cli.py
 ```
 
-### Checking Memory
-
-```python
-from agent import load_memory, get_task_state_summary
-
-memory = load_memory()
-summary = get_task_state_summary(memory)
-print(summary)
-```
-
-## Requirements
-
-- Python 3.8+
-- Ollama (local LLM server)
-- Docker 24+ for the containerized workflow
-- Python runtime dependency: `requests` (declared in `requirements.txt`)
-
-## Starting Ollama
+Verifier la configuration Docker :
 
 ```bash
-# Download a model (first time)
-ollama pull mistral    # or llama2, neural-chat, etc.
-
-# Start Ollama server
-ollama serve
+docker compose config
 ```
 
-## Design Philosophy
+Verifier Ollama :
 
-**Autonomous & Resilient**: The agent never gives up. It tries, observes, corrects, and retries until success.
+```bash
+ollama list
+curl http://localhost:11434/api/tags
+```
 
-**Local & Private**: Uses Ollama exclusively—no cloud, no API keys, all data stays local.
+## Roadmap De Stabilisation
 
-**Minimal Dependencies**: Core functionality stays lean and uses only `requests` beyond the standard library.
+Priorite 1 : boucle agent robuste
 
-**Responsible**: The agent owns the outcome and validates completion before stopping.
+- extraire `agent/router.py`
+- extraire `agent/state.py`
+- extraire `agent/finalizer.py`
+- ajouter un etat final obligatoire
+- rendre les side effects git non bloquants pour la reponse finale
 
----
+Priorite 2 : contrats internes
 
-**Status**: V4 Architecture - Production Ready
+- creer `ToolCall` et `ToolResult`
+- creer `AgentEvent`
+- creer `MemoryMessage`
+- normaliser les messages LLM
+- ajouter des erreurs domaine explicites
+
+Priorite 3 : executor et plugin system
+
+- separer `executor/executor.py` et `executor/registry.py`
+- deplacer les permissions tool dans un module dedie
+- ajouter manifest plugin
+- permettre activation/desactivation de tools
+
+Priorite 4 : CLI production
+
+- decouper `anubis_cli.py`
+- isoler renderer, commands, session et streaming
+- afficher les tool calls via events structures
+- garder la logique agent hors du terminal
+
+Priorite 5 : observabilite
+
+- logs JSON optionnels
+- traces par run
+- metriques par tool
+- rapport d'echec final explicite
+
+## Principes De Developpement
+
+- Robustesse avant nouvelles fonctionnalites.
+- Dependency injection avant imports globaux.
+- LLM stateless.
+- Memory isolee.
+- Executor independant.
+- Tools sans connaissance de l'agent.
+- Une seule direction de dependance.
+- Une reponse finale utilisateur est obligatoire.
+
+## Statut
+
+Anubis est un prototype avance d'agent autonome local. Il est fonctionnel, mais la prochaine etape importante est la stabilisation de son architecture interne pour le rendre production-ready.
+

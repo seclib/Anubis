@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import json
 import logging
+from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any, Callable
 
@@ -19,8 +20,9 @@ from agent.debugger_agent import (
     create_debugger_state,
     normalize_debugger_report,
 )
-from agent.hermes_memory import hermes_context_text, remember_interaction
-from agent.memory import append_event, get_context_summary, load_memory, save_memory
+from agent.dependencies import AgentDependencies
+from memory.hermes import hermes_context_text, remember_interaction
+from memory.state import append_event, get_context_summary, load_memory, save_memory
 from agent.multi_agent import (
     CODER_AGENT,
     DEBUGGER_AGENT,
@@ -59,7 +61,7 @@ from agent.tester_agent import (
     create_tester_state,
     normalize_validation_report,
 )
-from agent.vector_memory import index_agent_history, retrieve_context
+from memory.vector import index_agent_history, retrieve_context
 from config import (
     AUTO_GIT_COMMIT_ENABLED,
     CONTINUOUS_RUN,
@@ -71,6 +73,11 @@ from tools.dynamic_tools import dynamic_tool_specs
 from executor.tool_executor import execute_tool
 
 logger = logging.getLogger(__name__)
+
+_ACTIVE_DEPENDENCIES: ContextVar[AgentDependencies | None] = ContextVar(
+    "agent_loop_dependencies",
+    default=None,
+)
 
 MAX_STEPS = CONFIG_MAX_STEPS
 MAX_SELF_HEALING_RETRIES = max(0, min(MAX_TOOL_RETRIES, 3))
@@ -156,6 +163,49 @@ TOOL_SPECS = {
 }
 
 ProgressCallback = Callable[[dict[str, Any]], None]
+
+
+class _LoopMemoryStore:
+    """Default adapter kept patchable for legacy tests and CLI callers."""
+
+    def load(self) -> dict[str, Any]:
+        return load_memory()
+
+    def save(self, memory: dict[str, Any]) -> None:
+        save_memory(memory)
+
+    def append_event(self, memory: dict[str, Any], event: dict[str, Any]) -> None:
+        append_event(memory, event)
+
+    def context_summary(self, memory: dict[str, Any]) -> str:
+        return get_context_summary(memory)
+
+
+class _LoopToolExecutor:
+    """Default adapter around the module-level executor compatibility API."""
+
+    def execute(self, tool: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+        return execute_tool(tool, args)
+
+
+def _default_loop_dependencies() -> AgentDependencies:
+    return AgentDependencies(
+        tool_executor=_LoopToolExecutor(),
+        memory=_LoopMemoryStore(),
+        call_agent=call_agent,
+    )
+
+
+def _dependencies(dependencies: AgentDependencies | None = None) -> AgentDependencies:
+    return dependencies or _ACTIVE_DEPENDENCIES.get() or _default_loop_dependencies()
+
+
+def _save_memory(memory: dict[str, Any]) -> None:
+    _dependencies().memory.save(memory)
+
+
+def _context_summary(memory: dict[str, Any]) -> str:
+    return _dependencies().memory.context_summary(memory)
 
 
 def _now_iso() -> str:
@@ -255,8 +305,13 @@ def _set_state(memory: dict[str, Any], state: str, status: str | None = None) ->
         memory["progression"]["status"] = status
 
 
-def _initial_memory(task: str, use_planner: bool) -> dict[str, Any]:
-    previous = load_memory()
+def _initial_memory(
+    task: str,
+    use_planner: bool,
+    dependencies: AgentDependencies | None = None,
+) -> dict[str, Any]:
+    deps = _dependencies(dependencies)
+    previous = deps.memory.load()
     memory = {
         "tasks": list(previous.get("tasks", [])),
         "actions": list(previous.get("actions", [])),
@@ -353,6 +408,7 @@ def _record_event(
     reason: str = "",
     next_step: str = "",
     metadata: dict[str, Any] | None = None,
+    dependencies: AgentDependencies | None = None,
 ) -> None:
     event = {
         "step": step,
@@ -368,7 +424,8 @@ def _record_event(
     }
     if metadata:
         event.update(metadata)
-    append_event(memory, event)
+    deps = _dependencies(dependencies)
+    deps.memory.append_event(memory, event)
 
 
 def _soft_limit_reached(memory: dict[str, Any]) -> bool:
@@ -415,7 +472,7 @@ def _stop_for_total_blockage(
         )
     except Exception as exc:
         logger.debug("Hermes memory store failed after blockage: %s", exc)
-    save_memory(memory)
+    _save_memory(memory)
     return memory["final_result"]
 
 
@@ -630,7 +687,9 @@ def _call_agent(
     *,
     phase: str,
     progress_callback: ProgressCallback | None = None,
+    dependencies: AgentDependencies | None = None,
 ) -> str:
+    deps = _dependencies(dependencies)
     _emit_progress(
         progress_callback,
         "agent_start",
@@ -677,7 +736,7 @@ def _call_agent(
             cycle=memory.get("cycle"),
             step=memory.get("total_steps"),
         )
-    output = call_agent(agent_name, task_prompt, collaboration_context(memory))
+    output = deps.call_agent(agent_name, task_prompt, collaboration_context(memory))
     record_result(
         memory,
         agent_name=agent_name,
@@ -718,7 +777,9 @@ def _refresh_repo_analysis(
     reason: str,
     progress_callback: ProgressCallback | None = None,
     analysis_type: str = "self_healing",
+    dependencies: AgentDependencies | None = None,
 ) -> dict[str, Any]:
+    deps = _dependencies(dependencies)
     checks = [
         ("detect_project_type", {"root": "."}),
         ("scan_repo_tree", {"root": "."}),
@@ -756,7 +817,7 @@ def _refresh_repo_analysis(
             step=memory.get("total_steps"),
             cycle=memory.get("cycle"),
         )
-        result = execute_tool(tool_name, tool_args)
+        result = deps.tool_executor.execute(tool_name, tool_args)
         snapshot["checks"].append(
             {
                 "tool": tool_name,
@@ -778,6 +839,7 @@ def _refresh_repo_analysis(
                 "self_healing": not initial_analysis,
                 "analysis_type": analysis_type,
             },
+            dependencies=deps,
         )
         _emit_progress(
             progress_callback,
@@ -849,7 +911,7 @@ def _normalize_analysis(analysis: dict[str, Any]) -> dict[str, Any]:
 
 
 def _fallback_analysis(task: str, memory: dict[str, Any]) -> dict[str, Any]:
-    current_context = get_context_summary(memory)
+    current_context = _context_summary(memory)
     repo_context = _repo_context_text(memory)
     return _normalize_analysis(
         {
@@ -876,7 +938,7 @@ def _fallback_analysis(task: str, memory: dict[str, Any]) -> dict[str, Any]:
 
 
 def _build_analysis_prompt(task: str, memory: dict[str, Any]) -> str:
-    context = get_context_summary(memory)
+    context = _context_summary(memory)
     orchestrator_context = build_orchestrator_context(memory)
     vector_context = _vector_context_text(task)
     hermes_context = memory.get("hermes_context") or _hermes_context_text(task)
@@ -962,7 +1024,7 @@ def _request_analysis(
 
 def _build_action_prompt(task: str, memory: dict[str, Any]) -> str:
     state = memory.get("state", STATE_EXECUTE)
-    context = get_context_summary(memory)
+    context = _context_summary(memory)
     task_analysis = _short(memory.get("task_analysis"))
     strategy_change_required = memory.get("strategy_change_required", False)
     blocked_retry = memory.get("blocked_retry") or {}
@@ -1113,7 +1175,7 @@ Dernier resultat:
 {_short(last_result)}
 
 Contexte recent:
-{get_context_summary(memory)}
+{_context_summary(memory)}
 
 Amelioration continue:
 {_self_improvement_text(memory)}
@@ -1174,35 +1236,27 @@ def evaluate_success(
     last_result: dict[str, Any] | None,
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
-    """Ask the LLM whether the task is fully completed."""
-    reviewer_output = _call_agent(
-        REVIEWER_AGENT,
-        _build_evaluate_success_prompt(task, memory, last_result),
+    """Ask the LLM whether the task is fully completed (single LLM call)."""
+    prompt = _build_evaluate_success_prompt(task, memory, last_result)
+    # Un seul appel LLM — l'orchestrator arbitre avec contexte reviewer+tester
+    raw_output = _call_agent(
+        ORCHESTRATOR_AGENT,
+        prompt,
         memory,
         phase="review",
         progress_callback=progress_callback,
     )
-    tester_output = _call_agent(
-        TESTER_AGENT,
-        _build_evaluate_success_prompt(task, memory, last_result),
-        memory,
-        phase="test_verification",
-        progress_callback=progress_callback,
-    )
-    raw_output = reviewer_output
-    review_report = normalize_review_report(parse_action(reviewer_output))
-    memory["last_review_report"] = review_report
-    memory["last_tester_output"] = tester_output
-    tester_report = normalize_validation_report(parse_action(tester_output))
-    memory["last_validation_report"] = tester_report
-    memory["last_evaluate_output"] = raw_output
     parsed = parse_action(raw_output)
+    review_report = normalize_review_report(parsed)
+    memory["last_review_report"] = review_report
+    memory["last_validation_report"] = normalize_validation_report(parsed)
+    memory["last_evaluate_output"] = raw_output
+
     if isinstance(parsed, dict) and "success" in parsed:
         return {
             "success": _coerce_bool(parsed.get("success"), default=False),
             "reason": str(parsed.get("reason", "")),
         }
-
     return {
         "success": False,
         "reason": f"Invalid success evaluation JSON: {_short(raw_output, 300)}",
@@ -1262,7 +1316,7 @@ Historique des echecs de ce tool:
 {json.dumps(failure_history, ensure_ascii=False, indent=2)}
 
 Contexte recent:
-{get_context_summary(memory)}
+{_context_summary(memory)}
 
 Amelioration continue:
 {_self_improvement_text(memory)}
@@ -1370,6 +1424,7 @@ def _execute_tool_with_auto_correction(
     next_step: str,
     progress_callback: ProgressCallback | None = None,
 ) -> tuple[dict[str, Any], bool]:
+    deps = _dependencies()
     current_args = args
     failure_history: list[dict[str, Any]] = []
     max_retries = MAX_SELF_HEALING_RETRIES
@@ -1389,7 +1444,7 @@ def _execute_tool_with_auto_correction(
             state=memory.get("state"),
             step=memory.get("total_steps"),
         )
-        result = execute_tool(tool, current_args)
+        result = deps.tool_executor.execute(tool, current_args)
         error_text = _extract_error_text(result) if not result.get("success") else ""
         retry_reason = reason if attempt == 0 else f"Auto-correction retry #{attempt}: {reason}"
 
@@ -1649,6 +1704,7 @@ def _attempt_autonomous_git_commit(
     memory: dict[str, Any],
     progress_callback: ProgressCallback | None = None,
 ) -> dict[str, Any]:
+    deps = _dependencies()
     if not AUTO_GIT_COMMIT_ENABLED:
         result = {
             "success": True,
@@ -1674,7 +1730,7 @@ def _attempt_autonomous_git_commit(
         step=memory.get("total_steps"),
         cycle=memory.get("cycle"),
     )
-    result = execute_tool("autonomous_git_commit", args)
+    result = deps.tool_executor.execute("autonomous_git_commit", args)
     memory["last_git_commit"] = result
     _record_event(
         memory=memory,
@@ -1718,9 +1774,31 @@ def run_agent_loop(
     task: str,
     use_planner: bool = True,
     progress_callback: ProgressCallback | None = None,
+    dependencies: AgentDependencies | None = None,
 ) -> Any:
     """Run the autonomous state machine until the task completes."""
-    memory = _initial_memory(task, use_planner)
+    deps = _dependencies(dependencies)
+    token = _ACTIVE_DEPENDENCIES.set(deps)
+    try:
+        return _run_agent_loop(
+            task=task,
+            use_planner=use_planner,
+            progress_callback=progress_callback,
+            dependencies=deps,
+        )
+    finally:
+        _ACTIVE_DEPENDENCIES.reset(token)
+
+
+def _run_agent_loop(
+    task: str,
+    use_planner: bool,
+    progress_callback: ProgressCallback | None,
+    dependencies: AgentDependencies,
+) -> Any:
+    """Run the autonomous state machine with explicit injected dependencies."""
+    deps = dependencies
+    memory = _initial_memory(task, use_planner, dependencies=deps)
     _set_state(memory, STATE_INIT, status="running")
     _emit_progress(
         progress_callback,
@@ -1729,7 +1807,7 @@ def run_agent_loop(
         state=STATE_INIT,
         task=task,
     )
-    save_memory(memory)
+    deps.memory.save(memory)
 
     while True:
         state = memory.get("state", STATE_INIT)
@@ -1759,7 +1837,7 @@ def run_agent_loop(
             memory["successful_tools_at_cycle_start"] = int(memory.get("successful_tools", 0))
             memory["cycles_without_progress"] = 0
             memory["blockage_reason"] = ""
-            vector_result = execute_tool("index_repository", {"root": ".", "force": False})
+            vector_result = deps.tool_executor.execute("index_repository", {"root": ".", "force": False})
             memory["last_vector_index"] = vector_result
             _emit_progress(
                 progress_callback,
@@ -1781,6 +1859,7 @@ def run_agent_loop(
                 reason="Initial repository analysis",
                 progress_callback=progress_callback,
                 analysis_type="initial",
+                dependencies=deps,
             )
             _set_state(memory, STATE_ANALYZE, status="running")
             _emit_progress(
@@ -1789,12 +1868,12 @@ def run_agent_loop(
                 "Initial repository analysis complete, moving to task analysis",
                 state=STATE_ANALYZE,
             )
-            save_memory(memory)
+            _save_memory(memory)
             continue
 
         if state == STATE_ANALYZE:
             _refresh_self_improvement(memory, progress_callback=progress_callback)
-            analysis = _request_analysis(task, memory)
+            analysis = _request_analysis(task, memory, progress_callback=progress_callback)
             memory["task_analysis"] = analysis
             memory["analysis_round"] = int(memory.get("analysis_round", 0)) + 1
             memory["consecutive_failures"] = 0
@@ -1812,12 +1891,12 @@ def run_agent_loop(
             )
             _summarize_collaboration(memory, progress_callback=progress_callback)
             _set_state(memory, STATE_PLAN, status="running")
-            save_memory(memory)
+            _save_memory(memory)
             continue
 
         if state == STATE_PLAN:
             try:
-                planner_context = get_context_summary(memory)
+                planner_context = _context_summary(memory)
                 planner_context = (
                     f"{planner_context}\n\nContexte repository initial:\n"
                     f"{_repo_context_text(memory)}"
@@ -1876,7 +1955,7 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
                     error=str(exc),
                 )
             _set_state(memory, STATE_EXECUTE, status="running")
-            save_memory(memory)
+            _save_memory(memory)
             continue
 
         if state in {STATE_EXECUTE, STATE_FIX}:
@@ -1901,7 +1980,7 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
                         memory.get("blockage_reason", "Total blockage detected"),
                         progress_callback=progress_callback,
                     )
-                save_memory(memory)
+                _save_memory(memory)
                 continue
 
             memory["step_in_cycle"] = int(memory.get("step_in_cycle", 0)) + 1
@@ -1935,7 +2014,7 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
                     result=result,
                 )
                 _set_state(memory, STATE_FIX, status="running")
-                save_memory(memory)
+                _save_memory(memory)
                 continue
 
             action = _normalize_llm_action(action)
@@ -1971,7 +2050,7 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
                     plan=memory["plan"],
                 )
                 _set_state(memory, STATE_EXECUTE, status="running")
-                save_memory(memory)
+                _save_memory(memory)
                 continue
 
             if action_type == "final" or tool in {"final", "none"}:
@@ -1997,7 +2076,7 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
                     result=result,
                 )
                 _set_state(memory, STATE_VERIFY, status="running")
-                save_memory(memory)
+                _save_memory(memory)
                 continue
 
             result, change_strategy = _execute_tool_with_auto_correction(
@@ -2046,7 +2125,7 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
                     result=result,
                 )
                 _set_state(memory, STATE_VERIFY, status="running")
-            save_memory(memory)
+            _save_memory(memory)
             continue
 
         if state == STATE_VERIFY:
@@ -2086,7 +2165,7 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
                         result=git_result,
                     )
                     _set_state(memory, STATE_FIX, status="running")
-                    save_memory(memory)
+                    _save_memory(memory)
                     continue
 
                 memory["final_result"] = final_output
@@ -2111,7 +2190,7 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
                     )
                 except Exception as exc:
                     logger.debug("Hermes memory store failed after completion: %s", exc)
-                save_memory(memory)
+                _save_memory(memory)
                 continue
 
             if verification["status"] == "fix":
@@ -2140,7 +2219,7 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
                         verification=verification,
                     )
                     _set_state(memory, STATE_FIX, status="running")
-                save_memory(memory)
+                _save_memory(memory)
                 continue
 
             memory["pending_final"] = None
@@ -2160,11 +2239,14 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
                     memory.get("blockage_reason", "Total blockage detected"),
                     progress_callback=progress_callback,
                 )
-            save_memory(memory)
+            _save_memory(memory)
             continue
 
         if state == STATE_COMPLETE:
-            save_memory(memory)
+            try:
+                _save_memory(memory)
+            except Exception as exc:
+                logger.error("Failed to save final memory state: %s", exc)
             _emit_progress(
                 progress_callback,
                 "run_finished",
@@ -2183,7 +2265,7 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
             state=STATE_ANALYZE,
         )
         _set_state(memory, STATE_ANALYZE, status="running")
-        save_memory(memory)
+        _save_memory(memory)
 
 
 __all__ = [

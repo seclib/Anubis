@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any
 
-from agent.hermes_memory import (
+from memory.hermes import (
     append_daily_memory_summary as _append_daily_memory_summary,
     hermes_recall as _hermes_recall,
     index_obsidian_vault as _index_obsidian_vault,

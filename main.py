@@ -22,8 +22,9 @@ from config import (
     CONTINUOUS_RUN,
     OLLAMA_MODEL,
 )
-from agent import run_agent_loop, get_task_state_summary, load_memory
+from agent.loop import run_agent_loop
 from agent.streaming import format_progress_event
+from memory.state import get_task_state_summary, load_memory
 
 # Configure logging
 logging.basicConfig(

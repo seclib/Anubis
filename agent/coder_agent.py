@@ -6,7 +6,7 @@ from typing import Any
 
 CODER_AGENT = "coder_agent"
 
-RECOMMENDED_CODER_MODEL = "deepseek-coder-v2"
+RECOMMENDED_CODER_MODEL = "qwen2.5-coder:7b"
 
 CODER_RESPONSIBILITIES = [
     "modify_code",

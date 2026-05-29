@@ -3,7 +3,16 @@
 from __future__ import annotations
 
 import json
+import re
 from typing import Any
+
+
+def _extract_markdown_json_block(text: str) -> str | None:
+    """Extract JSON from ```json ... ``` blocks."""
+    match = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", text, re.DOTALL)
+    if match:
+        return match.group(1)
+    return None
 
 
 def _extract_json_object(text: str) -> str | None:
@@ -37,19 +46,16 @@ def _extract_json_object(text: str) -> str | None:
             if depth == 0:
                 return text[start:index + 1]
 
-    end = text.rfind("}")
-    if end > start:
-        return text[start:end + 1]
     return None
 
 
 def parse_action(text: str) -> Any | None:
-    """Parse a JSON action from raw LLM text.
+    """Parse a JSON action from raw LLM text, tolerating Chain of Thought.
 
     Strategy:
-    1. Try ``json.loads`` directly.
-    2. Otherwise extract a ``{...}`` block and parse it.
-    3. Return ``None`` on failure.
+    1. Try exact match (json.loads).
+    2. Try extracting ```json blocks.
+    3. Try finding the first balanced {...} block.
     """
     if not isinstance(text, str):
         return None
@@ -62,6 +68,13 @@ def parse_action(text: str) -> Any | None:
         return json.loads(cleaned)
     except Exception:
         pass
+
+    markdown_block = _extract_markdown_json_block(cleaned)
+    if markdown_block:
+        try:
+            return json.loads(markdown_block)
+        except Exception:
+            pass
 
     candidate = _extract_json_object(cleaned)
     if not candidate:

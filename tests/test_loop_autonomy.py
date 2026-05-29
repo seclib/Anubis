@@ -6,8 +6,8 @@ from pathlib import Path
 from unittest.mock import patch
 
 from agent import loop
-from agent import hermes_memory
-from agent import vector_memory
+from memory import hermes as hermes_memory
+from memory import vector as vector_memory
 from agent.communication import (
     communication_context,
     communication_snapshot,
