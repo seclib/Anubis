@@ -359,6 +359,71 @@ def _daily_memory_path(day: str | None = None) -> Path:
     return target
 
 
+def _daily_memory_section(entry: dict[str, Any]) -> str:
+    tags = {str(tag).lower() for tag in entry.get("tags", [])}
+    category = str(entry.get("category", "")).lower()
+    text = " ".join(
+        str(entry.get(key, "")).lower() for key in ("summary", "task", "result")
+    )
+    if "user-preference" in tags or "preference" in tags or category == "user":
+        return "User preferences"
+    if "project" in tags or category == "project" or "project" in text:
+        return "Projects"
+    if "insight" in tags or category == "insight":
+        return "Insights"
+    return "Key facts"
+
+
+def _daily_memory_template(date_text: str) -> str:
+    return (
+        f"# Memory - {date_text}\n\n"
+        "## Key facts\n\n"
+        "## User preferences\n\n"
+        "## Projects\n\n"
+        "## Insights\n"
+    )
+
+
+def _ensure_daily_memory_template(content: str, date_text: str) -> str:
+    if not content.strip():
+        return _daily_memory_template(date_text)
+
+    lines = content.splitlines()
+    if lines and lines[0].startswith("# Memories - "):
+        lines[0] = f"# Memory - {date_text}"
+        content = "\n".join(lines)
+
+    content = content.replace(
+        "\nConcise long-term memory extracted from interactions.\n", "\n"
+    )
+    content = content.replace("\n## Entries\n", "\n## Key facts\n")
+
+    if not content.startswith(f"# Memory - {date_text}"):
+        content = f"# Memory - {date_text}\n\n" + content.lstrip()
+
+    for section in ("Key facts", "User preferences", "Projects", "Insights"):
+        heading = f"## {section}"
+        if heading not in content:
+            content = content.rstrip() + f"\n\n{heading}\n"
+    return content
+
+
+def _append_to_daily_section(content: str, section: str, block: str) -> str:
+    heading = f"## {section}"
+    marker = content.find(heading)
+    if marker == -1:
+        return content.rstrip() + f"\n\n{heading}\n\n{block.lstrip()}"
+
+    next_marker = content.find("\n## ", marker + len(heading))
+    insert_at = len(content) if next_marker == -1 else next_marker
+    before = content[:insert_at].rstrip()
+    after = content[insert_at:].lstrip("\n")
+    updated = before + "\n\n" + block.strip() + "\n"
+    if after:
+        updated += "\n" + after
+    return updated
+
+
 def append_daily_memory_summary(entry: dict[str, Any], day: str | None = None) -> dict[str, Any]:
     """Append a concise durable-memory summary to the daily Obsidian memory note."""
     if not HERMES_MEMORY_ENABLED:
@@ -370,13 +435,8 @@ def append_daily_memory_summary(entry: dict[str, Any], day: str | None = None) -
     if entry_id and f"<!-- {entry_id} -->" in existing:
         return {"success": True, "status": "duplicate", "path": _display_path(path)}
 
-    if not existing.strip():
-        date_text = path.stem
-        existing = (
-            f"# Memories - {date_text}\n\n"
-            "Concise long-term memory extracted from interactions.\n\n"
-            "## Entries\n"
-        )
+    date_text = path.stem
+    existing = _ensure_daily_memory_template(existing, date_text)
 
     tags = ", ".join(str(tag) for tag in entry.get("tags", [])[:10])
     lessons = entry.get("lessons") if isinstance(entry.get("lessons"), list) else []
@@ -388,7 +448,8 @@ def append_daily_memory_summary(entry: dict[str, Any], day: str | None = None) -
         f"  - Tags: {tags}\n"
         f"  - Lessons: {lesson_text}\n"
     )
-    path.write_text(existing.rstrip() + "\n" + block, encoding="utf-8")
+    section = _daily_memory_section(entry)
+    path.write_text(_append_to_daily_section(existing, section, block), encoding="utf-8")
     _append_vector_document(
         "obsidian_daily_memory",
         _display_path(path),
@@ -464,10 +525,76 @@ def remember_interaction(task: str, result: Any, memory: dict[str, Any] | None =
     )
 
 
+def _memory_match_priority(match: dict[str, Any]) -> str:
+    metadata = match.get("metadata") if isinstance(match.get("metadata"), dict) else {}
+    tags = {
+        str(tag).lower()
+        for tag in (
+            list(match.get("tags", []) or [])
+            + list(metadata.get("tags", []) or [])
+        )
+    }
+    text = str(match.get("text", "")).lower()
+    if "high" in tags or "high" in text:
+        return "high"
+    return "normal"
+
+
+def _is_high_confidence_memory_match(match: dict[str, Any]) -> bool:
+    score = float(match.get("score") or 0.0)
+    priority = _memory_match_priority(match)
+    if priority == "high" and score >= 0.25:
+        return True
+    return score >= 0.35
+
+
+def _memory_fact(match: dict[str, Any]) -> str:
+    text = str(match.get("text", "")).strip()
+    skipped_headings = {"key facts", "user preferences", "projects", "insights"}
+    for line in text.splitlines():
+        raw_line = line.lstrip()
+        if raw_line.startswith("#"):
+            continue
+        fact = line.strip(" -#*")
+        normalized = fact.lower()
+        if (
+            not fact
+            or normalized.startswith("memory - ")
+            or normalized.startswith("<!--")
+            or normalized.startswith("created:")
+            or normalized.startswith("tags:")
+            or normalized in skipped_headings
+        ):
+            continue
+        if fact:
+            return fact[:240]
+    return "Relevant memory found."
+
+
+def _memory_context_block(matches: list[dict[str, Any]], limit: int) -> str:
+    facts = []
+    seen = set()
+    for match in matches:
+        if not _is_high_confidence_memory_match(match):
+            continue
+        fact = _memory_fact(match)
+        key = fact.lower()
+        if key in seen:
+            continue
+        seen.add(key)
+        facts.append(fact)
+        if len(facts) >= limit:
+            break
+
+    if not facts:
+        return "### Memory Context"
+    return "### Memory Context\n" + "\n".join(f"- {fact}" for fact in facts)
+
+
 def hermes_recall(query: str, top_k: int = 5) -> dict[str, Any]:
     """Retrieve relevant long-term memory, Obsidian notes, and vector matches."""
     if not HERMES_MEMORY_ENABLED:
-        return {"enabled": False, "context": "Hermes memory disabled."}
+        return {"enabled": False, "context": "### Memory Context"}
     index_result = index_obsidian_vault(force=False)
     json_matches = search_json_memory(query, top_k=top_k)
     note_matches = search_obsidian_notes(query, top_k=top_k)
@@ -477,27 +604,18 @@ def hermes_recall(query: str, top_k: int = 5) -> dict[str, Any]:
         top_k=top_k,
     )
 
-    blocks = []
-    for label, matches in (
-        ("Hermes JSON memory", json_matches),
-        ("Obsidian notes", note_matches),
-        ("Vector recall", vector_matches),
-    ):
-        if not matches:
-            continue
-        blocks.append(label + ":")
-        for match in matches[:top_k]:
-            blocks.append(
-                f"- [{match.get('source')} score={match.get('score')}] "
-                f"{str(match.get('text', ''))[:500]}"
-            )
+    ranked_matches = sorted(
+        [*json_matches, *note_matches, *vector_matches],
+        key=lambda match: float(match.get("score") or 0.0),
+        reverse=True,
+    )
     return {
         "enabled": True,
         "index": index_result,
         "json_matches": json_matches,
         "obsidian_matches": note_matches,
         "vector_matches": vector_matches,
-        "context": "\n".join(blocks) if blocks else "No relevant Hermes memory found.",
+        "context": _memory_context_block(ranked_matches, top_k),
     }
 
 

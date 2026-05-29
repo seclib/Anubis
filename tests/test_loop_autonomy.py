@@ -382,7 +382,7 @@ class AutonomousLoopTest(unittest.TestCase):
                 task="Configure Hermes",
                 result="Hermes stores memories in Obsidian notes",
                 lessons=["Search memory before acting"],
-                tags=["hermes", "obsidian"],
+                tags=["hermes", "obsidian", "user-preference"],
             )
             recall = hermes_memory.hermes_recall("Obsidian Hermes memory", top_k=3)
 
@@ -390,7 +390,18 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertTrue(stored["note"]["path"].endswith(".md"))
         self.assertTrue(stored["daily_note"]["path"].endswith(".md"))
         self.assertTrue((vault / "memories").exists())
+        daily_note = next((vault / "memories").glob("*.md"))
+        daily_text = daily_note.read_text(encoding="utf-8")
+        self.assertIn("# Memory - ", daily_text)
+        self.assertIn("## Key facts", daily_text)
+        self.assertIn("## User preferences", daily_text)
+        self.assertIn("## Projects", daily_text)
+        self.assertIn("## Insights", daily_text)
+        self.assertIn("Remember Obsidian vault setup", daily_text)
         self.assertIn("Obsidian", recall["context"])
+        self.assertTrue(recall["context"].startswith("### Memory Context"))
+        self.assertNotIn("score=", recall["context"])
+        self.assertNotIn("Hermes JSON memory", recall["context"])
         self.assertTrue(recall["json_matches"])
         self.assertTrue(recall["obsidian_matches"])
 
