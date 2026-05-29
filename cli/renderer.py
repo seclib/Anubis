@@ -9,11 +9,11 @@ from rich.panel import Panel
 from rich.text import Text
 
 from config import OLLAMA_MODEL
-from executor.tool_executor import execute_tool
 from llm.ollama import stream_chat
 from memory.state import get_context_summary, load_memory
 from cli.session import ConversationMemory
 from cli.ui import console
+from runtime.tool_registry import default_tool_executor
 
 
 def stream_response(conversation: ConversationMemory, user_input: str) -> str:
@@ -60,7 +60,7 @@ def execute_and_display(
     console.print(f"  [bold magenta]> EXEC[/bold magenta] [cyan]{action}[/cyan] ", end="")
     console.print(f"[dim]{json.dumps(args, ensure_ascii=False)}[/dim]")
 
-    result = execute_tool(action, args)
+    result = default_tool_executor().execute(action, args)
     success = result.get("success", False)
     output = result.get("output", "")
 
@@ -83,4 +83,3 @@ def execute_and_display(
 
     fact = f"[{action}] {user_input} -> {'OK' if success else 'FAIL'}: {out_str[:500]}"
     conversation.inject_fact(fact)
-

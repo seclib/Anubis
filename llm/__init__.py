@@ -1,11 +1,6 @@
-"""
-LLM Module - Language model interface via Ollama
+"""Stateless LLM clients.
+
+Import provider functions from concrete modules such as ``llm.ollama``.
 """
 
-from llm.ollama import call_chat, call_llm, stream_chat
-
-__all__ = [
-    "call_chat",
-    "call_llm",
-    "stream_chat",
-]
+__all__: list[str] = []

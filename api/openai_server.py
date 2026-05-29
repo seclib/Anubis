@@ -12,8 +12,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import urlparse
 
-from agent.loop import run_agent_loop
-from agent.streaming import (
+from runtime.agent_runner import run_agent_loop
+from runtime.streaming import (
     agent_event_payload,
     format_live_execution_event,
     format_sse_event,

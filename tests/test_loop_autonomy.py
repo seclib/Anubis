@@ -20,7 +20,7 @@ from agent.self_improvement import (
     propose_strategy_improvements,
     update_self_improvement_memory,
 )
-from executor import tool_executor
+from runtime import tool_registry as tool_executor
 from tools import autonomous_developer
 from tools import git_autonomy
 from tools import dynamic_tools

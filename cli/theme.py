@@ -9,8 +9,8 @@ from rich.panel import Panel
 from rich.text import Text
 
 from config import OLLAMA_BASE_URL, OLLAMA_MODEL, PROJECT_ROOT, STATE_DIR
-from executor.tool_executor import TOOLS
 from cli.ui import CLAUDE_ORANGE, MUTED_TEXT, VERSION, console
+from runtime.tool_registry import tool_registry
 
 def compact_path(path: Path, max_len: int = 48) -> str:
     text = str(path)
@@ -64,7 +64,7 @@ def banner_panel() -> Panel:
         (_fit("Hermes-style CLI runtime", left_width), MUTED_TEXT),
         ("", MUTED_TEXT),
         (_fit(f"model   {OLLAMA_MODEL}", left_width), MUTED_TEXT),
-        (_fit(f"tools   {len(TOOLS)} loaded", left_width), MUTED_TEXT),
+        (_fit(f"tools   {len(tool_registry())} loaded", left_width), MUTED_TEXT),
         (_fit(f"scope   ~{compact_path(PROJECT_ROOT, left_width - 9)}", left_width), MUTED_TEXT),
     ]
     right_lines = [

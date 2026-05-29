@@ -1,5 +1,6 @@
-"""HTTP API helpers for the local agent backend."""
+"""HTTP API package.
 
-from api.openai_server import run_openai_compatible_server
+Import concrete servers from their modules to avoid eager runtime assembly.
+"""
 
-__all__ = ["run_openai_compatible_server"]
+__all__: list[str] = []

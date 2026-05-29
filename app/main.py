@@ -24,8 +24,8 @@ PROJECT_SOURCE = Path(__file__).resolve().parent.parent
 if str(PROJECT_SOURCE) not in sys.path:
     sys.path.insert(0, str(PROJECT_SOURCE))
 
-from agent.loop import run_agent_loop
-from agent.streaming import (
+from runtime.agent_runner import run_agent_loop
+from runtime.streaming import (
     agent_event_payload,
     format_live_execution_event,
     format_sse_event,

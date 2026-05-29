@@ -11,8 +11,8 @@ from rich.table import Table
 from rich.text import Text
 
 from config import OLLAMA_BASE_URL, OLLAMA_MODEL, PROJECT_ROOT, STATE_DIR
-from executor.tool_executor import TOOLS
 from memory.state import get_task_state_summary, load_memory
+from runtime.tool_registry import tool_registry
 from cli.session import ConversationMemory
 from cli.ui import console, logger
 
@@ -66,10 +66,11 @@ def handle_command(cmd: str, conversation: ConversationMemory) -> bool:
         return True
 
     if command == "/tools":
-        table = Table(title=f"Tools ({len(TOOLS)})", border_style="dim")
+        tools = tool_registry()
+        table = Table(title=f"Tools ({len(tools)})", border_style="dim")
         table.add_column("Tool", style="cyan bold")
         table.add_column("Module", style="dim")
-        for name, fn in sorted(TOOLS.items()):
+        for name, fn in sorted(tools.items()):
             table.add_row(name, fn.__module__)
         console.print(table)
         console.print()
@@ -116,7 +117,7 @@ def handle_command(cmd: str, conversation: ConversationMemory) -> bool:
 
 def run_agent_task(task: str) -> None:
     try:
-        from agent.loop import run_agent_loop
+        from runtime.agent_runner import run_agent_loop
 
         console.print(f"\n[bold magenta]> AUTONOMOUS AGENT[/bold magenta] [cyan]{task}[/cyan]\n")
         status_text = Text("Initializing...", style="dim")
@@ -198,4 +199,3 @@ def save_session(conversation: ConversationMemory) -> None:
     }
     out.write_text(json.dumps(data, indent=2, ensure_ascii=False), encoding="utf-8")
     console.print(f"[green]Session saved to {out}[/green]\n")
-

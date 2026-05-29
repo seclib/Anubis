@@ -20,9 +20,7 @@ from agent.debugger_agent import (
     create_debugger_state,
     normalize_debugger_report,
 )
-from agent.dependencies import AgentDependencies
-from memory.hermes import hermes_context_text, remember_interaction
-from memory.state import append_event, get_context_summary, load_memory, save_memory
+from core.contracts import AgentDependencies
 from agent.multi_agent import (
     CODER_AGENT,
     DEBUGGER_AGENT,
@@ -33,7 +31,6 @@ from agent.multi_agent import (
     TESTER_AGENT,
     agent_roster,
     append_agent_message,
-    call_agent,
     collaboration_context,
 )
 from agent.orchestrator_agent import (
@@ -61,7 +58,6 @@ from agent.tester_agent import (
     create_tester_state,
     normalize_validation_report,
 )
-from memory.vector import index_agent_history, retrieve_context
 from config import (
     AUTO_GIT_COMMIT_ENABLED,
     CONTINUOUS_RUN,
@@ -69,8 +65,6 @@ from config import (
     MAX_STEPS as CONFIG_MAX_STEPS,
     MAX_TOOL_RETRIES,
 )
-from tools.dynamic_tools import dynamic_tool_specs
-from executor.tool_executor import execute_tool
 
 logger = logging.getLogger(__name__)
 
@@ -182,17 +176,78 @@ class _LoopMemoryStore:
 
 
 class _LoopToolExecutor:
-    """Default adapter around the module-level executor compatibility API."""
+    """No-op adapter for legacy direct agent calls without runtime wiring."""
 
     def execute(self, tool: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
-        return execute_tool(tool, args)
+        return {
+            "success": False,
+            "output": (
+                f"No runtime tool executor injected for `{tool}`. "
+                "Use runtime.agent_runner.run_agent_loop for production runs."
+            ),
+        }
 
 
 def _default_loop_dependencies() -> AgentDependencies:
+    return _legacy_loop_dependencies()
+
+
+def execute_tool(tool: str, args: dict[str, Any] | None = None) -> dict[str, Any]:
+    """Compatibility hook for tests and legacy callers.
+
+    Production entrypoints inject a ToolRunner through AgentDependencies.
+    """
+    return _dependencies().tool_executor.execute(tool, args)
+
+
+def load_memory() -> dict[str, Any]:
+    return {}
+
+
+def save_memory(memory: dict[str, Any]) -> None:
+    return None
+
+
+def append_event(memory: dict[str, Any], event: dict[str, Any]) -> None:
+    memory.setdefault("actions", []).append(event)
+
+
+def get_context_summary(memory: dict[str, Any]) -> str:
+    task = memory.get("task") or "No active task"
+    state = memory.get("state") or "unknown"
+    return f"Task: {task}\nState: {state}"
+
+
+def index_agent_history(memory: dict[str, Any]) -> dict[str, Any]:
+    return _dependencies().index_agent_history(memory)
+
+
+def remember_interaction(task: str, result: Any, memory: dict[str, Any]) -> dict[str, Any]:
+    return _dependencies().remember_interaction(task, result, memory)
+
+
+def _legacy_loop_dependencies() -> AgentDependencies:
     return AgentDependencies(
         tool_executor=_LoopToolExecutor(),
         memory=_LoopMemoryStore(),
         call_agent=call_agent,
+        vector_context=lambda query: "Vector context unavailable without runtime dependencies.",
+        hermes_context=lambda query: "Hermes memory unavailable without runtime dependencies.",
+        index_agent_history=lambda memory: {},
+        remember_interaction=lambda task, result, memory: {},
+    )
+
+
+def call_agent(agent_name: str, task_prompt: str, collaboration_context: str = "") -> str:
+    """Compatibility hook patched by legacy tests.
+
+    Production runs inject ``AgentDependencies.call_agent`` from the runtime
+    assembly layer; the agent package does not import LLM providers or runtime
+    adapters.
+    """
+    raise RuntimeError(
+        f"No runtime agent caller injected for `{agent_name}`. "
+        "Use runtime.agent_runner.run_agent_loop for production runs."
     )
 
 
@@ -215,7 +270,7 @@ def _now_iso() -> str:
 def _tool_specs_text() -> str:
     specs = dict(TOOL_SPECS)
     try:
-        specs.update(dynamic_tool_specs())
+        specs.update(_dependencies().tool_specs())
     except Exception as exc:
         logger.debug("Dynamic tool specs unavailable: %s", exc)
     return "\n".join(
@@ -597,7 +652,7 @@ def _collaboration_text(memory: dict[str, Any]) -> str:
 
 def _vector_context_text(query: str) -> str:
     try:
-        return retrieve_context(query=query, top_k=5)
+        return _dependencies().vector_context(query)
     except Exception as exc:
         logger.debug("Vector context retrieval failed: %s", exc)
         return "Vector context unavailable."
@@ -605,7 +660,7 @@ def _vector_context_text(query: str) -> str:
 
 def _hermes_context_text(query: str) -> str:
     try:
-        return hermes_context_text(query)
+        return _dependencies().hermes_context(query)
     except Exception as exc:
         logger.debug("Hermes context retrieval failed: %s", exc)
         return "Hermes memory unavailable."
@@ -817,7 +872,7 @@ def _refresh_repo_analysis(
             step=memory.get("total_steps"),
             cycle=memory.get("cycle"),
         )
-        result = deps.tool_executor.execute(tool_name, tool_args)
+        result = execute_tool(tool_name, tool_args)
         snapshot["checks"].append(
             {
                 "tool": tool_name,
@@ -1444,7 +1499,7 @@ def _execute_tool_with_auto_correction(
             state=memory.get("state"),
             step=memory.get("total_steps"),
         )
-        result = deps.tool_executor.execute(tool, current_args)
+        result = execute_tool(tool, current_args)
         error_text = _extract_error_text(result) if not result.get("success") else ""
         retry_reason = reason if attempt == 0 else f"Auto-correction retry #{attempt}: {reason}"
 
@@ -1730,7 +1785,7 @@ def _attempt_autonomous_git_commit(
         step=memory.get("total_steps"),
         cycle=memory.get("cycle"),
     )
-    result = deps.tool_executor.execute("autonomous_git_commit", args)
+    result = execute_tool("autonomous_git_commit", args)
     memory["last_git_commit"] = result
     _record_event(
         memory=memory,

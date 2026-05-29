@@ -19,7 +19,6 @@ from config import (
     REVIEWER_AGENT_MODEL,
     TESTER_AGENT_MODEL,
 )
-from llm.ollama import call_llm
 
 
 ORCHESTRATOR_AGENT = "orchestrator_agent"
@@ -133,12 +132,6 @@ Agent task:
 """
 
 
-def call_agent(agent_name: str, task_prompt: str, collaboration_context: str = "") -> str:
-    spec = get_agent(agent_name)
-    prompt = agent_prompt(agent_name, task_prompt, collaboration_context)
-    return call_llm(prompt, model=spec.model)
-
-
 def agent_roster() -> list[dict[str, str]]:
     return [
         {
@@ -208,7 +201,6 @@ __all__ = [
     "agent_prompt",
     "agent_roster",
     "append_agent_message",
-    "call_agent",
     "collaboration_context",
     "get_agent",
 ]

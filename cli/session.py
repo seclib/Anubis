@@ -4,20 +4,10 @@ import json
 from datetime import datetime
 from pathlib import Path
 
-from config import PROJECT_ROOT, STATE_DIR
-from agent.prompts import SYSTEM_PROMPT
+from config import STATE_DIR
+from runtime.prompts import CLI_SYSTEM_PROMPT
 
 MAX_CONTEXT_MESSAGES = 40
-
-CLI_SYSTEM_PROMPT = f"""{SYSTEM_PROMPT}
-
-ADDITIONAL CLI RULES:
-- You are in interactive terminal mode. Be concise and technical.
-- When the user asks a direct question, answer it with Markdown.
-- For tool execution, output the standard JSON action block.
-- Current working directory: {PROJECT_ROOT}
-- Current date: {{date}}
-""".strip()
 
 
 class ConversationMemory:
@@ -109,4 +99,3 @@ class ConversationMemory:
                 handle.write(json.dumps(entry, ensure_ascii=False) + "\n")
         except OSError:
             pass
-

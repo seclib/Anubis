@@ -1,9 +1,7 @@
-"""
-Executor Module - Tool execution with automatic retry and error correction
+"""Generic executor package.
+
+Import primitives from ``executor.tool_executor``. The package facade stays
+empty so importing ``executor`` never imports runtime or concrete tools.
 """
 
-from executor.tool_executor import execute_tool
-
-__all__ = [
-    "execute_tool",
-]
+__all__: list[str] = []

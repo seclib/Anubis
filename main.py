@@ -22,8 +22,8 @@ from config import (
     CONTINUOUS_RUN,
     OLLAMA_MODEL,
 )
-from agent.loop import run_agent_loop
-from agent.streaming import format_progress_event
+from runtime.agent_runner import run_agent_loop
+from runtime.streaming import format_progress_event
 from memory.state import get_task_state_summary, load_memory
 
 # Configure logging
