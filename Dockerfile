@@ -7,10 +7,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PIP_NO_CACHE_DIR=1 \
-    APP_HOME=/opt/anubis-agent \
+    APP_HOME=/app/anubis-agent \
     WORKSPACE_DIR=/workspace \
     WORKSPACE_ROOT=/workspace \
-    PYTHONPATH=/opt/anubis-agent \
+    PYTHONPATH=/app/anubis-agent \
     PROJECT_ROOT=/workspace \
     HOME=/tmp \
     TMPDIR=/tmp
@@ -19,7 +19,7 @@ WORKDIR ${APP_HOME}
 
 RUN apt-get update \
     && apt-get install -y --no-install-recommends ca-certificates git \
-    && rm -rf /var/lib/apt/lists/*
+    && apt-get clean
 
 COPY requirements.txt .
 RUN python -m pip install --upgrade pip \
@@ -42,5 +42,5 @@ EXPOSE 8000
 HEALTHCHECK --interval=30s --timeout=5s --start-period=15s --retries=3 \
     CMD python -c "import json, urllib.request; response = urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=3); payload = json.loads(response.read().decode()); raise SystemExit(0 if payload.get('status') == 'ok' else 1)"
 
-ENTRYPOINT ["/opt/anubis-agent/docker/entrypoint.sh"]
+ENTRYPOINT ["/app/anubis-agent/docker/entrypoint.sh"]
 CMD ["uvicorn", "app.main:app", "--host", "0.0.0.0", "--port", "8000"]

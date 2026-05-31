@@ -308,23 +308,21 @@ docker compose up --build
 Le compose Anubis lance :
 
 - `anubis-agent` sur `http://localhost:8000/v1`
+- `qdrant` sur `http://localhost:6333`
 
-Qdrant est un service externe partage, gere dans `~/qdrant` :
+Qdrant est un service vectoriel partage. Il reste independant d'Anubis : Anubis ne le cree pas lui-meme, ne declare aucun `depends_on`, et le contacte uniquement via `QDRANT_URL`.
 
 ```bash
-cd ~/qdrant
-docker compose up -d
 curl http://localhost:6333/collections
 ```
 
-Dans Docker, Anubis contacte Ollama via l'hote et Qdrant via le reseau externe `qdrant-net` :
+Dans Docker, Anubis contacte Qdrant via le DNS de service Docker sur le reseau `anubis-net` :
 
 ```text
-http://host.docker.internal:11434
 QDRANT_URL=http://qdrant:6333
 ```
 
-Si votre environnement Docker permet l'acces aux ports publies de l'hote depuis les conteneurs, `QDRANT_URL=http://host.docker.internal:6333` ou `QDRANT_URL=http://<IP_HOTE>:6333` peut aussi etre utilise.
+Pour une execution hors conteneur, utilisez `QDRANT_URL=http://localhost:6333`.
 
 ## Configuration Principale
 

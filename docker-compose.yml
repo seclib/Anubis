@@ -1,5 +1,22 @@
 services:
   # =========================
+  # 🧠 QDRANT VECTOR SERVICE
+  # =========================
+  qdrant:
+    image: qdrant/qdrant:latest
+    container_name: qdrant
+    restart: unless-stopped
+
+    ports:
+      - "6333:6333"
+
+    volumes:
+      - qdrant_data:/qdrant/storage
+
+    networks:
+      - anubis-net
+
+  # =========================
   # 🤖 ANUBIS AGENT
   # =========================
   anubis-agent:
@@ -30,7 +47,7 @@ services:
       API_BASE_PATH: /v1
 
       # 🧠 OLLAMA (LOCAL)
-      OLLAMA_BASE_URL: http://host.docker.internal:11434
+      OLLAMA_BASE_URL: ${OLLAMA_BASE_URL:-http://localhost:11434}
       OLLAMA_MODEL: qwen2.5-coder:7b
       OLLAMA_FALLBACK_MODEL: qwen2.5-coder:7b
       OLLAMA_NUM_CTX: 8192
@@ -48,8 +65,7 @@ services:
       # 🔥 MEMORY (QDRANT RESILIENT MODE)
       HERMES_MEMORY_ENABLED: "true"
       HERMES_MEMORY_BACKEND: qdrant
-      QDRANT_URL: ${QDRANT_URL:-http://host.docker.internal:6333}
-      QDRANT_FALLBACK_URL: ${QDRANT_FALLBACK_URL:-http://qdrant:6333}
+      QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       QDRANT_COLLECTION: hermes_memory
 
       # 🧠 fallback local memory (IMPORTANT FOR HEALING)
@@ -72,19 +88,15 @@ services:
 
     volumes:
       - anubis-workspace:/workspace
-      - /home/fatsio/ObsidianVault:/obsidian:rw
+      - obsidian-vault:/obsidian
 
     working_dir: /workspace
 
     ports:
       - "8000:8000"
 
-    extra_hosts:
-      - host.docker.internal:host-gateway
-
     networks:
       - anubis-net
-      - qdrant-net
 
 
 # =========================
@@ -92,6 +104,8 @@ services:
 # =========================
 volumes:
   anubis-workspace:
+  obsidian-vault:
+  qdrant_data:
 
 
 # =========================
@@ -100,6 +114,3 @@ volumes:
 networks:
   anubis-net:
     driver: bridge
-  qdrant-net:
-    external: true
-    name: qdrant-net
