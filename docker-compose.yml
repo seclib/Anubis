@@ -1,38 +1,4 @@
 services:
-
-  # =========================
-  # 🧠 QDRANT (AUTO-HEALING VECTOR DB)
-  # =========================
-  qdrant:
-    image: qdrant/qdrant:v1.11.5
-    container_name: qdrant
-    restart: unless-stopped
-
-    ports:
-      - "6333:6333"
-
-    volumes:
-      - qdrant_data:/qdrant/storage
-
-    networks:
-      - anubis-net
-
-    # 🧠 AUTO-HEALING STRATEGY
-    healthcheck:
-      test: ["CMD-SHELL", "bash -c '</dev/tcp/localhost/6333'"]
-      interval: 10s
-      timeout: 3s
-      retries: 10
-      start_period: 10s
-
-    deploy:
-      restart_policy:
-        condition: on-failure
-        delay: 5s
-        max_attempts: 10
-        window: 120s
-
-
   # =========================
   # 🤖 ANUBIS AGENT
   # =========================
@@ -82,7 +48,8 @@ services:
       # 🔥 MEMORY (QDRANT RESILIENT MODE)
       HERMES_MEMORY_ENABLED: "true"
       HERMES_MEMORY_BACKEND: qdrant
-      QDRANT_URL: http://qdrant:6333
+      QDRANT_URL: ${QDRANT_URL:-http://host.docker.internal:6333}
+      QDRANT_FALLBACK_URL: ${QDRANT_FALLBACK_URL:-http://qdrant:6333}
       QDRANT_COLLECTION: hermes_memory
 
       # 🧠 fallback local memory (IMPORTANT FOR HEALING)
@@ -115,12 +82,9 @@ services:
     extra_hosts:
       - host.docker.internal:host-gateway
 
-    depends_on:
-      qdrant:
-        condition: service_started
-
     networks:
       - anubis-net
+      - qdrant-net
 
 
 # =========================
@@ -128,7 +92,6 @@ services:
 # =========================
 volumes:
   anubis-workspace:
-  qdrant_data:
 
 
 # =========================
@@ -137,3 +100,6 @@ volumes:
 networks:
   anubis-net:
     driver: bridge
+  qdrant-net:
+    external: true
+    name: qdrant-net

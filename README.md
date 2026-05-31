@@ -305,16 +305,26 @@ curl -N http://localhost:8000/v1/agent/stream \
 docker compose up --build
 ```
 
-Le compose lance :
+Le compose Anubis lance :
 
 - `anubis-agent` sur `http://localhost:8000/v1`
-- `qdrant` sur `http://localhost:6333`
 
-Dans Docker, Anubis contacte Ollama via :
+Qdrant est un service externe partage, gere dans `~/qdrant` :
+
+```bash
+cd ~/qdrant
+docker compose up -d
+curl http://localhost:6333/collections
+```
+
+Dans Docker, Anubis contacte Ollama via l'hote et Qdrant via le reseau externe `qdrant-net` :
 
 ```text
 http://host.docker.internal:11434
+QDRANT_URL=http://qdrant:6333
 ```
+
+Si votre environnement Docker permet l'acces aux ports publies de l'hote depuis les conteneurs, `QDRANT_URL=http://host.docker.internal:6333` ou `QDRANT_URL=http://<IP_HOTE>:6333` peut aussi etre utilise.
 
 ## Configuration Principale
 
@@ -388,7 +398,7 @@ Anubis utilise plusieurs niveaux de memoire :
 - `state/runtime.json` : etat runtime, historique, progression
 - `state/hermes_memory.json` : memoire long terme locale
 - `state/vector_store.json` : index vectoriel local
-- Qdrant optionnel via `HERMES_MEMORY_BACKEND=qdrant`
+- Qdrant externe optionnel via `HERMES_MEMORY_BACKEND=qdrant` et `QDRANT_URL`
 - Obsidian optionnel via `OBSIDIAN_VAULT_PATH`
 
 Regles de stabilite :
@@ -502,4 +512,3 @@ Priorite 5 : observabilite
 ## Statut
 
 Anubis est un prototype avance d'agent autonome local. Il est fonctionnel, mais la prochaine etape importante est la stabilisation de son architecture interne pour le rendre production-ready.
-
