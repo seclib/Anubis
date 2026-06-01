@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from config import OBSIDIAN_RAG_ENABLED, OSINT_CRAWLER_ENABLED
 from executor.tool_executor import ToolExecutor, ToolFunction
 from runtime.plugins import PluginManager, builtin_tool_plugin
 from tools.autonomous_developer import (
@@ -38,6 +39,7 @@ from tools.hermes_memory import (
     store_hermes_memory,
     write_obsidian_note,
 )
+from tools.osint import crawl_osint_sources, fetch_external_data
 from tools.repo import (
     detect_project_type,
     find_entrypoints,
@@ -127,12 +129,20 @@ def build_tool_registry() -> dict[str, ToolFunction]:
         "run_project_tests": run_project_tests,
         "start_project_server": start_project_server,
         "stop_project_server": stop_project_server,
-        "search_hermes_memory": search_hermes_memory,
-        "index_obsidian_vault": index_obsidian_vault,
-        "store_hermes_memory": store_hermes_memory,
-        "write_obsidian_note": write_obsidian_note,
-        "append_daily_memory_summary": append_daily_memory_summary,
     }
+    if OBSIDIAN_RAG_ENABLED:
+        builtin_tools.update(
+            {
+                "search_hermes_memory": search_hermes_memory,
+                "index_obsidian_vault": index_obsidian_vault,
+                "store_hermes_memory": store_hermes_memory,
+                "write_obsidian_note": write_obsidian_note,
+                "append_daily_memory_summary": append_daily_memory_summary,
+            }
+        )
+    if OSINT_CRAWLER_ENABLED:
+        builtin_tools["fetch_external_data"] = fetch_external_data
+        builtin_tools["crawl_osint_sources"] = crawl_osint_sources
     plugins = plugin_manager()
     if not any(plugin["name"] == "builtin" for plugin in plugins.manifest()):
         plugins.register(builtin_tool_plugin(builtin_tools))

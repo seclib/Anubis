@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import json
 import logging
+import re
+import threading
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from typing import Any, Callable
@@ -60,10 +62,15 @@ from agent.tester_agent import (
 )
 from config import (
     AUTO_GIT_COMMIT_ENABLED,
+    BASE_CHAT_ENABLED,
+    CODE_ASSIST_ENABLED,
     CONTINUOUS_RUN,
     MAX_RETRIES,
     MAX_STEPS as CONFIG_MAX_STEPS,
     MAX_TOOL_RETRIES,
+    OBSIDIAN_RAG_ENABLED,
+    OSINT_CRAWLER_ENABLED,
+    QUERY_CACHE_HIT_THRESHOLD,
 )
 
 logger = logging.getLogger(__name__)
@@ -153,6 +160,12 @@ TOOL_SPECS = {
         "folder": "Hermes",
     },
     "append_daily_memory_summary": {"entry": {"id": "...", "summary": "..."}, "day": "YYYY-MM-DD"},
+    "fetch_external_data": {"url": "<absolute http(s) URL>", "timeout": 10, "max_chars": 12000},
+    "crawl_osint_sources": {
+        "query": "<cyber/osint/pentest/coding topic>",
+        "seeds": ["<optional source URL>"],
+        "max_sources": 6,
+    },
     "final": {"result": "<result>"},
 }
 
@@ -233,6 +246,16 @@ def _legacy_loop_dependencies() -> AgentDependencies:
         call_agent=call_agent,
         vector_context=lambda query: "Vector context unavailable without runtime dependencies.",
         hermes_context=lambda query: "Hermes memory unavailable without runtime dependencies.",
+        query_cache_lookup=lambda query: {
+            "enabled": False,
+            "hit": False,
+            "confidence": 0.0,
+            "matches": [],
+        },
+        query_cache_store=lambda query, result, context, metadata=None: {
+            "enabled": False,
+            "stored": False,
+        },
         index_agent_history=lambda memory: {},
         remember_interaction=lambda task, result, memory: {},
     )
@@ -269,6 +292,18 @@ def _now_iso() -> str:
 
 def _tool_specs_text() -> str:
     specs = dict(TOOL_SPECS)
+    if not OBSIDIAN_RAG_ENABLED:
+        for tool_name in (
+            "search_hermes_memory",
+            "index_obsidian_vault",
+            "store_hermes_memory",
+            "write_obsidian_note",
+            "append_daily_memory_summary",
+        ):
+            specs.pop(tool_name, None)
+    if not OSINT_CRAWLER_ENABLED:
+        specs.pop("fetch_external_data", None)
+        specs.pop("crawl_osint_sources", None)
     try:
         specs.update(_dependencies().tool_specs())
     except Exception as exc:
@@ -296,6 +331,79 @@ def _coerce_bool(value: Any, default: bool = False) -> bool:
             return False
         return default
     return bool(value)
+
+
+def detect_required_capabilities(task: str) -> dict[str, dict[str, Any]]:
+    """Choose enabled capabilities for the current task using cheap heuristics."""
+    normalized = task.lower()
+    has_url = "http://" in normalized or "https://" in normalized
+    osint_terms = {
+        "latest",
+        "current",
+        "today",
+        "news",
+        "web",
+        "website",
+        "url",
+        "crawl",
+        "fetch",
+        "osint",
+        "external",
+        "online",
+    }
+    code_terms = {
+        "code",
+        "repo",
+        "file",
+        "bug",
+        "fix",
+        "test",
+        "implement",
+        "program",
+        "python",
+        "api",
+        "docker",
+        "commit",
+        "refactor",
+        "build",
+    }
+
+    osint_needed = has_url or any(term in normalized for term in osint_terms)
+    code_needed = any(term in normalized for term in code_terms)
+    rag_needed = OBSIDIAN_RAG_ENABLED
+
+    return {
+        "BASE_CHAT": {
+            "enabled": BASE_CHAT_ENABLED,
+            "needed": True,
+            "reason": "general reasoning is the fallback response path",
+        },
+        "OSINT_CRAWLER": {
+            "enabled": OSINT_CRAWLER_ENABLED,
+            "needed": osint_needed,
+            "reason": "task references external or current web information" if osint_needed else "no external web signal detected",
+        },
+        "OBSIDIAN_RAG": {
+            "enabled": OBSIDIAN_RAG_ENABLED,
+            "needed": rag_needed,
+            "reason": "local knowledge base is enabled and should be preferred" if rag_needed else "local knowledge base disabled",
+        },
+        "CODE_ASSIST": {
+            "enabled": CODE_ASSIST_ENABLED,
+            "needed": code_needed,
+            "reason": "task appears to involve repository or programming work" if code_needed else "no code-specific signal detected",
+        },
+    }
+
+
+def _capability_enabled(memory: dict[str, Any], name: str) -> bool:
+    capability = memory.get("capabilities", {}).get(name, {})
+    return bool(capability.get("enabled") and capability.get("needed"))
+
+
+def _capabilities_text(memory: dict[str, Any]) -> str:
+    capabilities = memory.get("capabilities") or {}
+    return json.dumps(capabilities, ensure_ascii=False, indent=2, default=str)
 
 
 def _emit_progress(
@@ -381,6 +489,7 @@ def _initial_memory(
             "percent": 0,
         },
         "task": task,
+        "capabilities": detect_required_capabilities(task),
         "task_analysis": None,
         "status": "running",
         "created_at": _now_iso(),
@@ -439,6 +548,15 @@ def _initial_memory(
         "last_git_commit": None,
         "hermes_context": "",
         "last_hermes_memory": None,
+        "query_cache": {
+            "checked": False,
+            "hit": False,
+            "confidence": 0.0,
+            "matches": [],
+        },
+        "cache_context": "",
+        "osint_context": "",
+        "last_osint_ingestion": None,
         "self_improvement": {
             "performance": {},
             "strategy_improvements": [],
@@ -651,6 +769,8 @@ def _collaboration_text(memory: dict[str, Any]) -> str:
 
 
 def _vector_context_text(query: str) -> str:
+    if not OBSIDIAN_RAG_ENABLED:
+        return "OBSIDIAN_RAG disabled; vector/local knowledge context was not consulted."
     try:
         return _dependencies().vector_context(query)
     except Exception as exc:
@@ -664,6 +784,210 @@ def _hermes_context_text(query: str) -> str:
     except Exception as exc:
         logger.debug("Hermes context retrieval failed: %s", exc)
         return "Hermes memory unavailable."
+
+
+def _rag_context_text(task: str, memory: dict[str, Any]) -> str:
+    if not _capability_enabled(memory, "OBSIDIAN_RAG"):
+        return "OBSIDIAN_RAG disabled or not needed; local knowledge base was not consulted."
+    parts = []
+    cache_context = str(memory.get("cache_context") or "").strip()
+    if cache_context:
+        parts.append(cache_context)
+    hermes_context = str(memory.get("hermes_context") or _hermes_context_text(task)).strip()
+    if hermes_context:
+        parts.append(hermes_context)
+    osint_context = str(memory.get("osint_context") or "").strip()
+    if osint_context:
+        parts.append(osint_context)
+    return "\n\n".join(parts) if parts else "No relevant local knowledge found."
+
+
+def _query_cache_lookup(task: str) -> dict[str, Any]:
+    try:
+        result = _dependencies().query_cache_lookup(task)
+    except Exception as exc:
+        logger.debug("Query cache lookup failed: %s", exc)
+        return {"enabled": False, "hit": False, "confidence": 0.0, "matches": []}
+    return result if isinstance(result, dict) else {"enabled": False, "hit": False, "confidence": 0.0, "matches": []}
+
+
+def _cache_context_text(cache_result: dict[str, Any]) -> str:
+    matches = cache_result.get("matches")
+    if not isinstance(matches, list) or not matches:
+        return ""
+    backend = cache_result.get("backend", "cache")
+    enrichment = "yes" if cache_result.get("needs_enrichment") else "no"
+    blocks = [f"### Redis Cache Context\n- backend: {backend}\n- needs_enrichment: {enrichment}"]
+    for match in matches[:3]:
+        if not isinstance(match, dict):
+            continue
+        query = str(match.get("query") or "").strip()
+        confidence = match.get("confidence", 0.0)
+        result = _short(match.get("result", ""), 1200)
+        if result:
+            blocks.append(f"- confidence={confidence} query={query}\n{result}")
+    return "\n".join(blocks) if len(blocks) > 1 else ""
+
+
+def _cache_can_short_circuit(memory: dict[str, Any], cache_result: dict[str, Any]) -> bool:
+    if _capability_enabled(memory, "CODE_ASSIST"):
+        return False
+    if not bool(cache_result.get("hit")):
+        return False
+    try:
+        confidence = float(cache_result.get("confidence") or 0.0)
+    except (TypeError, ValueError):
+        confidence = 0.0
+    return confidence >= QUERY_CACHE_HIT_THRESHOLD
+
+
+def _extract_urls(text: str) -> list[str]:
+    urls = re.findall(r"https?://[^\s<>)\"']+", text)
+    cleaned = []
+    for url in urls:
+        stripped = url.rstrip(".,;:")
+        if stripped and stripped not in cleaned:
+            cleaned.append(stripped)
+    return cleaned
+
+
+def _run_osint_ingestion(
+    task: str,
+    urls: list[str],
+    dependencies: AgentDependencies,
+    progress_callback: ProgressCallback | None = None,
+) -> None:
+    crawl_result = dependencies.tool_executor.execute(
+        "crawl_osint_sources",
+        {"query": task, "seeds": urls, "max_sources": 6, "timeout": 10, "max_chars": 12000},
+    )
+    _emit_progress(
+        progress_callback,
+        "osint_crawl",
+        "OSINT crawler finished background source collection",
+        state=STATE_ANALYZE,
+        task=task,
+        result=crawl_result,
+    )
+    if crawl_result.get("success"):
+        output = crawl_result.get("output")
+        notes = output.get("notes", []) if isinstance(output, dict) else []
+        written = []
+        for note in notes:
+            if not isinstance(note, dict):
+                continue
+            note_result = dependencies.tool_executor.execute(
+                "write_obsidian_note",
+                {
+                    "title": str(note.get("title") or "OSINT crawler note"),
+                    "content": str(note.get("content") or ""),
+                    "folder": str(note.get("folder") or "OSINT"),
+                },
+            )
+            written.append(note_result)
+        if written:
+            index_result = dependencies.tool_executor.execute("index_obsidian_vault", {"force": False})
+            _emit_progress(
+                progress_callback,
+                "osint_index",
+                "OSINT crawler notes indexed into Obsidian/Qdrant memory",
+                state=STATE_ANALYZE,
+                task=task,
+                result={"written": written, "index": index_result},
+            )
+            return
+
+    ingested: list[dict[str, Any]] = []
+    for url in urls[:2]:
+        result = dependencies.tool_executor.execute(
+            "fetch_external_data",
+            {"url": url, "timeout": 10, "max_chars": 12000},
+        )
+        ingested.append({"url": url, "result": result})
+        _emit_progress(
+            progress_callback,
+            "osint_fetch",
+            f"OSINT source fetched: {url}",
+            state=STATE_ANALYZE,
+            url=url,
+            result=result,
+        )
+        if not result.get("success"):
+            continue
+        output = result.get("output")
+        if not isinstance(output, dict):
+            continue
+        text = str(output.get("text") or "").strip()
+        if not text:
+            continue
+        title = f"OSINT ingestion - {url}"
+        content = (
+            f"# {title}\n\n"
+            "## Summary\n\n"
+            "- External source captured for reusable OSINT/cyber knowledge.\n"
+            "- Validate time-sensitive claims before operational use.\n\n"
+            "## Source\n\n"
+            f"- Source: {url}\n"
+            f"- Retrieved: {_now_iso()}\n"
+            f"- Status: {output.get('status_code')}\n"
+            f"- Content-Type: {output.get('content_type')}\n\n"
+            "## Tools\n\n"
+            "- fetch_external_data\n\n"
+            "## Commands\n\n"
+            "```bash\n"
+            f"# Re-fetch source\ncurl -L {url}\n"
+            "```\n\n"
+            "## Workflow\n\n"
+            "- Fetch source.\n"
+            "- Remove repeated boilerplate.\n"
+            "- Preserve technical facts, tools, commands, indicators, and procedures.\n"
+            "- Index note into Obsidian/Qdrant for future retrieval.\n\n"
+            "## Extract\n\n"
+            f"{text[:12000]}\n"
+            "\n## RAG Notes\n\n"
+            "- Prefer stable facts and reproducible procedures.\n"
+            "- Treat vendor/news claims as source-attributed context.\n"
+        )
+        note_result = dependencies.tool_executor.execute(
+            "write_obsidian_note",
+            {"title": title, "content": content, "folder": "OSINT"},
+        )
+        ingested[-1]["note_result"] = note_result
+
+    if any(item.get("note_result", {}).get("success") for item in ingested):
+        index_result = dependencies.tool_executor.execute("index_obsidian_vault", {"force": False})
+        _emit_progress(
+            progress_callback,
+            "osint_index",
+            "OSINT findings indexed into Obsidian/Qdrant memory",
+            state=STATE_ANALYZE,
+            task=task,
+            result=index_result,
+        )
+
+
+def _maybe_ingest_osint(task: str, memory: dict[str, Any], progress_callback: ProgressCallback | None = None) -> str:
+    if not _capability_enabled(memory, "OSINT_CRAWLER"):
+        return ""
+    urls = _extract_urls(task)
+
+    memory["last_osint_ingestion"] = {
+        "status": "queued",
+        "mode": "background",
+        "urls": urls[:2],
+        "discovery": "enabled",
+        "queued_at": _now_iso(),
+    }
+    thread = threading.Thread(
+        target=_run_osint_ingestion,
+        args=(task, urls[:2], _dependencies(), progress_callback),
+        daemon=True,
+    )
+    thread.start()
+    return (
+        "### OSINT Context\n"
+        "Autonomous OSINT crawler has been queued in the background; answer with Redis/Qdrant/Obsidian context now and incorporate indexed findings on later queries."
+    )
 
 
 def _self_improvement_text(memory: dict[str, Any]) -> str:
@@ -996,7 +1320,7 @@ def _build_analysis_prompt(task: str, memory: dict[str, Any]) -> str:
     context = _context_summary(memory)
     orchestrator_context = build_orchestrator_context(memory)
     vector_context = _vector_context_text(task)
-    hermes_context = memory.get("hermes_context") or _hermes_context_text(task)
+    hermes_context = _rag_context_text(task, memory)
     return f"""{SYSTEM_PROMPT}
 
 Tu es en phase d'analyse autonome.
@@ -1008,6 +1332,9 @@ Contrat d'autonomie global:
 
 Task utilisateur:
 {task}
+
+Capabilities selected:
+{_capabilities_text(memory)}
 
 Cycle actuel:
 {memory.get("cycle", 1)}
@@ -1092,7 +1419,7 @@ def _build_action_prompt(task: str, memory: dict[str, Any]) -> str:
             ]
         )
     )
-    hermes_context = memory.get("hermes_context") or _hermes_context_text(task)
+    hermes_context = _rag_context_text(task, memory)
     if state == STATE_FIX and strategy_change_required:
         state_instruction = (
             "La tentative precedente a echoue meme apres auto-correction. "
@@ -1119,6 +1446,9 @@ Contrat d'autonomie global:
 
 Task utilisateur:
 {task}
+
+Capabilities selected:
+{_capabilities_text(memory)}
 
 Plan courant:
 {json.dumps(memory.get("plan", []), ensure_ascii=False, indent=2)}
@@ -1205,7 +1535,7 @@ def _build_evaluate_success_prompt(
     vector_context = _vector_context_text(
         f"{task}\n{_short(last_result, 600)}\n{_short(memory.get('last_validation_report'), 600)}"
     )
-    hermes_context = memory.get("hermes_context") or _hermes_context_text(task)
+    hermes_context = _rag_context_text(task, memory)
     return f"""Tu verifies l'avancement d'un agent autonome.
 
 Contrat d'autonomie global:
@@ -1213,6 +1543,9 @@ Contrat d'autonomie global:
 
 Task utilisateur:
 {task}
+
+Capabilities selected:
+{_capabilities_text(memory)}
 
 Etat actuel:
 {memory.get("state")}
@@ -1344,7 +1677,7 @@ def _build_correction_prompt(
 ) -> str:
     max_retries = MAX_SELF_HEALING_RETRIES
     vector_context = _vector_context_text(f"{task}\n{tool}\n{error_text}\n{_short(args, 600)}")
-    hermes_context = memory.get("hermes_context") or _hermes_context_text(task)
+    hermes_context = _rag_context_text(task, memory)
     return f"""{SYSTEM_PROMPT}
 
 Tu fais du self-healing de tool pour un agent autonome.
@@ -1354,6 +1687,9 @@ Contrat d'autonomie global:
 
 Task utilisateur:
 {task}
+
+Capabilities selected:
+{_capabilities_text(memory)}
 
 Tool en echec:
 {tool}
@@ -1892,6 +2228,37 @@ def _run_agent_loop(
             memory["successful_tools_at_cycle_start"] = int(memory.get("successful_tools", 0))
             memory["cycles_without_progress"] = 0
             memory["blockage_reason"] = ""
+            cache_result = _query_cache_lookup(task)
+            memory["query_cache"] = {
+                **cache_result,
+                "checked": True,
+            }
+            memory["cache_context"] = _cache_context_text(cache_result)
+            _emit_progress(
+                progress_callback,
+                "query_cache",
+                "Redis cache checked",
+                state=STATE_INIT,
+                result=memory["query_cache"],
+            )
+            if _cache_can_short_circuit(memory, cache_result):
+                best = cache_result.get("best") if isinstance(cache_result.get("best"), dict) else {}
+                final_output = str(best.get("result") or "")
+                memory["final_result"] = final_output
+                memory["completed_at"] = _now_iso()
+                _mark_progress(memory, "High-confidence cache hit")
+                _set_state(memory, STATE_COMPLETE, status="completed")
+                _emit_progress(
+                    progress_callback,
+                    "complete",
+                    "Task completed from high-confidence Redis cache hit",
+                    state=STATE_COMPLETE,
+                    final_result=final_output,
+                    cache=cache_result,
+                )
+                _save_memory(memory)
+                return final_output
+
             vector_result = deps.tool_executor.execute("index_repository", {"root": ".", "force": False})
             memory["last_vector_index"] = vector_result
             _emit_progress(
@@ -1901,14 +2268,30 @@ def _run_agent_loop(
                 state=STATE_INIT,
                 result=vector_result,
             )
-            memory["hermes_context"] = _hermes_context_text(task)
-            _emit_progress(
-                progress_callback,
-                "hermes_recall",
-                "Hermes long-term memory searched",
-                state=STATE_INIT,
-                result=memory["hermes_context"],
+            if _capability_enabled(memory, "OBSIDIAN_RAG"):
+                memory["hermes_context"] = _hermes_context_text(task)
+                _emit_progress(
+                    progress_callback,
+                    "hermes_recall",
+                    "Hermes long-term memory searched",
+                    state=STATE_INIT,
+                    result=memory["hermes_context"],
+                )
+            else:
+                memory["hermes_context"] = ""
+                _emit_progress(
+                    progress_callback,
+                    "hermes_recall_skipped",
+                    "OBSIDIAN_RAG disabled or not needed",
+                    state=STATE_INIT,
+                )
+            memory["osint_context"] = _maybe_ingest_osint(
+                task,
+                memory,
+                progress_callback=progress_callback,
             )
+            if memory["osint_context"] and _capability_enabled(memory, "OBSIDIAN_RAG"):
+                memory["hermes_context"] = _hermes_context_text(task)
             _refresh_repo_analysis(
                 memory,
                 reason="Initial repository analysis",
@@ -2245,6 +2628,25 @@ Split complex work into inspect -> implement -> validate/review steps when usefu
                     )
                 except Exception as exc:
                     logger.debug("Hermes memory store failed after completion: %s", exc)
+                try:
+                    memory["last_query_cache_store"] = deps.query_cache_store(
+                        task,
+                        final_output,
+                        _rag_context_text(task, memory),
+                        {
+                            "status": "completed",
+                            "capabilities": memory.get("capabilities", {}),
+                        },
+                    )
+                    _emit_progress(
+                        progress_callback,
+                        "query_cache_store",
+                        "Final answer stored in query cache",
+                        state=STATE_COMPLETE,
+                        result=memory["last_query_cache_store"],
+                    )
+                except Exception as exc:
+                    logger.debug("Query cache store failed after completion: %s", exc)
                 _save_memory(memory)
                 continue
 

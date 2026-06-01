@@ -1,10 +1,10 @@
 {
   "name": "test_dev_server",
-  "pid": 42050,
+  "pid": 50593,
   "command": "python3 server.py",
   "root": "state/test_server_project",
   "log_file": "state/dev_servers/test_dev_server.log",
-  "started_at": "2026-05-29T12:29:06.025134+00:00",
+  "started_at": "2026-06-01T05:32:28.783520+00:00",
   "running": false,
-  "stopped_at": "2026-05-29T12:29:06.026990+00:00"
+  "stopped_at": "2026-06-01T05:32:28.785180+00:00"
 }

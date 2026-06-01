@@ -51,6 +51,19 @@ OBSIDIAN_VAULT_PATH = Path(os.getenv("OBSIDIAN_VAULT_PATH", "state/obsidian_vaul
 OBSIDIAN_DAILY_MEMORY_DIR = os.getenv("OBSIDIAN_DAILY_MEMORY_DIR", "memories")
 QDRANT_URL = os.getenv("QDRANT_URL", "http://localhost:6333")
 QDRANT_COLLECTION = os.getenv("QDRANT_COLLECTION", "hermes_memory")
+REDIS_CACHE_ENABLED = os.getenv("REDIS_CACHE_ENABLED", "true").lower() == "true"
+REDIS_CACHE_URL = os.getenv("REDIS_CACHE_URL", "redis://localhost:6379/0")
+REDIS_CACHE_NAMESPACE = os.getenv("REDIS_CACHE_NAMESPACE", "anubis:query_cache")
+REDIS_CACHE_TTL_SECONDS = int(os.getenv("REDIS_CACHE_TTL_SECONDS", "604800"))
+QUERY_CACHE_ENABLED = os.getenv("QUERY_CACHE_ENABLED", "true").lower() == "true"
+QUERY_CACHE_FILE = Path(os.getenv("QUERY_CACHE_FILE", "state/query_cache.json"))
+QUERY_CACHE_HIT_THRESHOLD = float(os.getenv("QUERY_CACHE_HIT_THRESHOLD", "0.85"))
+
+# Optional agent capabilities
+BASE_CHAT_ENABLED = os.getenv("BASE_CHAT_ENABLED", "true").lower() == "true"
+OSINT_CRAWLER_ENABLED = os.getenv("OSINT_CRAWLER_ENABLED", "false").lower() == "true"
+OBSIDIAN_RAG_ENABLED = os.getenv("OBSIDIAN_RAG_ENABLED", "true").lower() == "true"
+CODE_ASSIST_ENABLED = os.getenv("CODE_ASSIST_ENABLED", "true").lower() == "true"
 
 # Agent Configuration
 MAX_STEPS = int(os.getenv("MAX_STEPS", "30"))
@@ -121,6 +134,17 @@ __all__ = [
     "OBSIDIAN_DAILY_MEMORY_DIR",
     "QDRANT_URL",
     "QDRANT_COLLECTION",
+    "REDIS_CACHE_ENABLED",
+    "REDIS_CACHE_URL",
+    "REDIS_CACHE_NAMESPACE",
+    "REDIS_CACHE_TTL_SECONDS",
+    "QUERY_CACHE_ENABLED",
+    "QUERY_CACHE_FILE",
+    "QUERY_CACHE_HIT_THRESHOLD",
+    "BASE_CHAT_ENABLED",
+    "OSINT_CRAWLER_ENABLED",
+    "OBSIDIAN_RAG_ENABLED",
+    "CODE_ASSIST_ENABLED",
     "MAX_STEPS",
     "MAX_RETRIES",
     "MAX_TOOL_RETRIES",

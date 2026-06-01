@@ -27,6 +27,9 @@ from core.workspace import relative_to_workspace, resolve_workspace_path, worksp
 
 MAX_NOTE_BYTES = 256_000
 MAX_RECALL_TEXT = 1400
+MAX_VECTOR_RECALL_RESULTS = 5
+WEAK_RETRIEVAL_SCORE = 0.18
+PRIORITY_DOMAINS = ("osint", "pentest", "cybersecurity", "cyber", "security")
 
 
 def _now_iso() -> str:
@@ -112,6 +115,85 @@ def _slug(value: str) -> str:
     return normalized[:80] or "memory"
 
 
+def _compact_markdown(content: str) -> str:
+    lines = [line.rstrip() for line in str(content or "").replace("\r\n", "\n").splitlines()]
+    compacted: list[str] = []
+    blank = False
+    seen_bullets: set[str] = set()
+    for line in lines:
+        stripped = line.strip()
+        if not stripped:
+            if not blank:
+                compacted.append("")
+            blank = True
+            continue
+        blank = False
+        if stripped.startswith(("- ", "* ")):
+            key = stripped.lower()
+            if key in seen_bullets:
+                continue
+            seen_bullets.add(key)
+        compacted.append(line)
+    return "\n".join(compacted).strip()
+
+
+def _ensure_section(content: str, heading: str, placeholder: str = "") -> str:
+    marker = f"## {heading}"
+    if marker in content:
+        return content
+    addition = f"\n\n{marker}\n"
+    if placeholder:
+        addition += f"\n{placeholder.strip()}\n"
+    return content.rstrip() + addition
+
+
+def obsidian_ready_markdown(
+    title: str,
+    content: str,
+    *,
+    folder: str = "Hermes",
+    tags: list[str] | None = None,
+) -> str:
+    """Normalize high-density technical notes for Obsidian and vector indexing."""
+    normalized_title = str(title or "Knowledge Note").strip() or "Knowledge Note"
+    body = _compact_markdown(content)
+    if body.startswith("---"):
+        # Existing frontmatter is preserved; just compact the markdown body.
+        markdown = body
+    else:
+        tag_values = [str(tag).strip().lower() for tag in (tags or []) if str(tag).strip()]
+        folder_tag = _slug(folder).replace("-", "_")
+        if folder_tag and folder_tag not in tag_values:
+            tag_values.append(folder_tag)
+        frontmatter = [
+            "---",
+            f"title: {normalized_title}",
+            f"created: {_now_iso()}",
+            "type: knowledge",
+            "rag_ready: true",
+            "tags:",
+        ]
+        frontmatter.extend(f"  - {tag}" for tag in tag_values[:12])
+        frontmatter.append("---")
+        if not body.startswith("# "):
+            body = f"# {normalized_title}\n\n{body}" if body else f"# {normalized_title}"
+        markdown = "\n".join(frontmatter) + "\n\n" + body
+
+    lower_content = markdown.lower()
+    technical_folder = _slug(folder) in {"osint", "pentest", "cybersecurity", "cyber", "security"}
+    technical_note = technical_folder or any(
+        keyword in lower_content
+        for keyword in ("osint", "pentest", "cve", "ioc", "indicator", "command", "tool", "workflow")
+    )
+    if technical_note:
+        markdown = _ensure_section(markdown, "Tools", "- None recorded.")
+        markdown = _ensure_section(markdown, "Commands", "```bash\n# None recorded.\n```")
+        markdown = _ensure_section(markdown, "Workflow", "- Preserve source, extract facts, index for retrieval.")
+        markdown = _ensure_section(markdown, "RAG Notes", "- Reusable facts only; avoid transient page noise.")
+
+    return _compact_markdown(markdown) + "\n"
+
+
 def _tokens(value: str) -> set[str]:
     return {token for token in re.findall(r"[a-zA-Z0-9_À-ÿ-]{3,}", value.lower())}
 
@@ -125,6 +207,38 @@ def _score_text(query: str, text: str) -> float:
     if overlap == 0:
         return 0.0
     return overlap / max(1, len(query_tokens))
+
+
+def _domain_priority(match: dict[str, Any]) -> float:
+    text = " ".join(
+        str(match.get(key, ""))
+        for key in ("source", "kind", "text", "metadata")
+    ).lower()
+    if any(domain in text for domain in PRIORITY_DOMAINS):
+        return 0.08
+    return 0.0
+
+
+def _ranked_memory_matches(matches: list[dict[str, Any]], top_k: int) -> list[dict[str, Any]]:
+    capped_top_k = min(MAX_VECTOR_RECALL_RESULTS, max(1, int(top_k)))
+    deduped: list[dict[str, Any]] = []
+    seen: set[tuple[str, str]] = set()
+    for match in matches:
+        source = str(match.get("source") or "")
+        text = str(match.get("text") or "")
+        key = (source, text[:200])
+        if key in seen:
+            continue
+        seen.add(key)
+        base_score = float(match.get("score") or 0.0)
+        ranked = {
+            **match,
+            "score": round(base_score, 6),
+            "rank_score": round(base_score + _domain_priority(match), 6),
+        }
+        deduped.append(ranked)
+    deduped.sort(key=lambda item: float(item.get("rank_score") or 0.0), reverse=True)
+    return deduped[:capped_top_k]
 
 
 def _safe_note_files() -> list[Path]:
@@ -163,7 +277,7 @@ def search_obsidian_notes(query: str, top_k: int = 5) -> list[dict[str, Any]]:
             }
         )
     results.sort(key=lambda item: (item["score"], item["updated_at"]), reverse=True)
-    return results[: max(1, int(top_k))]
+    return results[: min(MAX_VECTOR_RECALL_RESULTS, max(1, int(top_k)))]
 
 
 def _entry_text(entry: dict[str, Any]) -> str:
@@ -195,7 +309,7 @@ def search_json_memory(query: str, top_k: int = 5) -> list[dict[str, Any]]:
                 }
             )
     candidates.sort(key=lambda item: (item["score"], str(item.get("updated_at") or "")), reverse=True)
-    return candidates[: max(1, int(top_k))]
+    return candidates[: min(MAX_VECTOR_RECALL_RESULTS, max(1, int(top_k)))]
 
 
 def _append_vector_document(kind: str, source: str, text: str, metadata: dict[str, Any]) -> None:
@@ -303,7 +417,52 @@ def _local_vector_search(query: str, kinds: set[str], top_k: int) -> list[dict[s
             }
         )
     results.sort(key=lambda item: item["score"], reverse=True)
-    return results[: max(1, int(top_k))]
+    return results[: min(MAX_VECTOR_RECALL_RESULTS, max(1, int(top_k)))]
+
+
+def _qdrant_vector_search(query: str, kinds: set[str], top_k: int) -> list[dict[str, Any]]:
+    """Query Qdrant for mirrored Obsidian/Hermes memory points."""
+    if HERMES_MEMORY_BACKEND != "qdrant":
+        return []
+    base_url = QDRANT_URL.rstrip("/")
+    collection = QDRANT_COLLECTION.strip() or "hermes_memory"
+    try:
+        response = requests.post(
+            f"{base_url}/collections/{collection}/points/search",
+            json={
+                "vector": vector._hash_embedding(query),
+                "limit": min(MAX_VECTOR_RECALL_RESULTS, max(1, int(top_k))),
+                "with_payload": True,
+            },
+            timeout=3,
+        )
+        response.raise_for_status()
+        payload = response.json()
+    except Exception:
+        return []
+
+    matches = payload.get("result", [])
+    if not isinstance(matches, list):
+        return []
+    results: list[dict[str, Any]] = []
+    for match in matches:
+        if not isinstance(match, dict):
+            continue
+        point_payload = match.get("payload") if isinstance(match.get("payload"), dict) else {}
+        kind = point_payload.get("kind")
+        if kind not in kinds:
+            continue
+        results.append(
+            {
+                "score": round(float(match.get("score") or 0.0), 6),
+                "kind": kind,
+                "source": point_payload.get("source"),
+                "text": point_payload.get("text", ""),
+                "metadata": point_payload.get("metadata", {}),
+                "backend": "qdrant",
+            }
+        )
+    return results
 
 
 def index_obsidian_vault(force: bool = False) -> dict[str, Any]:
@@ -329,18 +488,26 @@ def index_obsidian_vault(force: bool = False) -> dict[str, Any]:
             documents.append(previous)
             reused += 1
             continue
-        documents.append(
-            {
-                "id": f"obsidian:{source}:{content_hash[:12]}",
-                "kind": "obsidian_note",
-                "source": source,
-                "chunk_index": 0,
-                "content_hash": content_hash,
-                "text": text[:MAX_RECALL_TEXT],
-                "embedding": vector._hash_embedding(f"{source}\n{text}"),
-                "metadata": {"path": source},
-                "updated_at": _now_iso(),
-            }
+        embedding = vector._hash_embedding(f"{source}\n{text}")
+        document = {
+            "id": f"obsidian:{source}:{content_hash[:12]}",
+            "kind": "obsidian_note",
+            "source": source,
+            "chunk_index": 0,
+            "content_hash": content_hash,
+            "text": text[:MAX_RECALL_TEXT],
+            "embedding": embedding,
+            "metadata": {"path": source},
+            "updated_at": _now_iso(),
+        }
+        documents.append(document)
+        _mirror_vector_document_to_qdrant(
+            str(document["id"]),
+            "obsidian_note",
+            source,
+            text[:MAX_RECALL_TEXT],
+            embedding,
+            {"path": source},
         )
         indexed += 1
     store["documents"] = documents
@@ -364,7 +531,8 @@ def write_obsidian_note(title: str, content: str, folder: str = "Hermes") -> dic
     filename = f"{datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S')}-{_slug(title)}.md"
     target = (target_dir / filename).resolve(strict=False)
     _ensure_inside_vault(target, vault)
-    target.write_text(content, encoding="utf-8")
+    normalized_content = obsidian_ready_markdown(title, content, folder=folder, tags=[safe_folder])
+    target.write_text(normalized_content, encoding="utf-8")
     return {"success": True, "path": _display_path(target)}
 
 
@@ -615,26 +783,47 @@ def _memory_context_block(matches: list[dict[str, Any]], limit: int) -> str:
 def hermes_recall(query: str, top_k: int = 5) -> dict[str, Any]:
     """Retrieve relevant long-term memory, Obsidian notes, and vector matches."""
     if not HERMES_MEMORY_ENABLED:
-        return {"enabled": False, "context": "### Memory Context"}
-    json_matches = search_json_memory(query, top_k=top_k)
-    note_matches = search_obsidian_notes(query, top_k=top_k)
+        return {
+            "enabled": False,
+            "weak_retrieval": True,
+            "osint_activation_recommended": True,
+            "context": "### Memory Context\n- Vector memory disabled; activate OSINT if external grounding is required.",
+        }
+    capped_top_k = min(MAX_VECTOR_RECALL_RESULTS, max(1, int(top_k)))
+    json_matches = search_json_memory(query, top_k=capped_top_k)
+    note_matches = search_obsidian_notes(query, top_k=capped_top_k)
     vector_matches = _local_vector_search(
         query,
         kinds={"hermes_memory", "obsidian_note", "obsidian_daily_memory", "agent_history"},
-        top_k=top_k,
+        top_k=capped_top_k,
+    )
+    qdrant_matches = _qdrant_vector_search(
+        query,
+        kinds={"hermes_memory", "obsidian_note", "obsidian_daily_memory", "agent_history"},
+        top_k=capped_top_k,
     )
 
-    ranked_matches = sorted(
-        [*json_matches, *note_matches, *vector_matches],
-        key=lambda match: float(match.get("score") or 0.0),
-        reverse=True,
+    ranked_matches = _ranked_memory_matches(
+        [*json_matches, *note_matches, *qdrant_matches, *vector_matches],
+        capped_top_k,
     )
+    best_score = float(ranked_matches[0].get("score") or 0.0) if ranked_matches else 0.0
+    weak_retrieval = not ranked_matches or best_score < WEAK_RETRIEVAL_SCORE
     return {
         "enabled": True,
         "json_matches": json_matches,
         "obsidian_matches": note_matches,
+        "qdrant_matches": qdrant_matches,
         "vector_matches": vector_matches,
-        "context": _memory_context_block(ranked_matches, top_k),
+        "ranked_matches": ranked_matches,
+        "weak_retrieval": weak_retrieval,
+        "osint_activation_recommended": weak_retrieval,
+        "context": _memory_context_block(ranked_matches, capped_top_k)
+        + (
+            "\n- Retrieval weak or incomplete; signal OSINT crawler activation."
+            if weak_retrieval
+            else ""
+        ),
     }
 
 
@@ -651,6 +840,7 @@ __all__ = [
     "index_obsidian_vault",
     "load_hermes_memory",
     "obsidian_vault_path",
+    "obsidian_ready_markdown",
     "append_daily_memory_summary",
     "remember_interaction",
     "save_hermes_memory",

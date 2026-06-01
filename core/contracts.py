@@ -37,6 +37,15 @@ class AgentDependencies:
     tool_specs: Callable[[], Mapping[str, Any]] = lambda: {}
     vector_context: Callable[[str], str] = lambda query: "Vector context unavailable."
     hermes_context: Callable[[str], str] = lambda query: "Hermes memory unavailable."
+    query_cache_lookup: Callable[[str], dict[str, Any]] = lambda query: {
+        "enabled": False,
+        "hit": False,
+        "confidence": 0.0,
+        "matches": [],
+    }
+    query_cache_store: Callable[[str, Any, str, dict[str, Any] | None], dict[str, Any]] = (
+        lambda query, result, context, metadata=None: {"enabled": False, "stored": False}
+    )
     index_agent_history: Callable[[dict[str, Any]], dict[str, Any]] = lambda memory: {}
     remember_interaction: Callable[[str, Any, dict[str, Any]], dict[str, Any]] = (
         lambda task, result, memory: {}

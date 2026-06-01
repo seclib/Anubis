@@ -8,6 +8,7 @@ from core.contracts import AgentCaller, AgentDependencies
 from memory import state as runtime_memory
 from memory import vector as vector_memory
 from memory import hermes as hermes_memory
+from memory import query_cache
 from runtime.tool_registry import default_tool_executor, runtime_tool_specs
 
 
@@ -35,6 +36,8 @@ def default_agent_dependencies(call_agent: AgentCaller) -> AgentDependencies:
         tool_specs=runtime_tool_specs,
         vector_context=lambda query: vector_memory.retrieve_context(query=query, top_k=5),
         hermes_context=hermes_memory.hermes_context_text,
+        query_cache_lookup=lambda query: query_cache.lookup_query_cache(query=query, top_k=3),
+        query_cache_store=query_cache.store_query_cache,
         index_agent_history=vector_memory.index_agent_history,
         remember_interaction=hermes_memory.remember_interaction,
     )

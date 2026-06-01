@@ -7,6 +7,7 @@ from unittest.mock import patch
 
 from agent import loop
 from memory import hermes as hermes_memory
+from memory import query_cache
 from memory import vector as vector_memory
 from agent.communication import (
     communication_context,
@@ -388,6 +389,9 @@ class AutonomousLoopTest(unittest.TestCase):
 
         self.assertTrue(stored["success"], stored)
         self.assertTrue(stored["note"]["path"].endswith(".md"))
+        note_text = Path(stored["note"]["path"]).read_text(encoding="utf-8")
+        self.assertIn("rag_ready: true", note_text)
+        self.assertIn("# Remember Obsidian vault setup", note_text)
         self.assertTrue(stored["daily_note"]["path"].endswith(".md"))
         self.assertTrue((vault / "memories").exists())
         daily_note = next((vault / "memories").glob("*.md"))
@@ -431,6 +435,140 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertIn("Hermes remembered context", action_prompt)
         self.assertIn("search_hermes_memory", analysis_prompt)
         self.assertTrue(callable(hermes_tools.search_hermes_memory))
+
+    def test_capability_detection_gates_obsidian_rag_context(self):
+        with patch.object(loop, "OBSIDIAN_RAG_ENABLED", False):
+            memory = loop._initial_memory("Answer without local memory", use_planner=True)
+            with patch.object(loop, "_hermes_context_text", return_value="should not appear"):
+                analysis_prompt = loop._build_analysis_prompt("Answer without local memory", memory)
+
+        self.assertFalse(memory["capabilities"]["OBSIDIAN_RAG"]["enabled"])
+        self.assertIn("OBSIDIAN_RAG disabled", analysis_prompt)
+        self.assertIn("vector/local knowledge context was not consulted", analysis_prompt)
+        self.assertNotIn("should not appear", analysis_prompt)
+
+    def test_query_cache_stores_and_recalls_similar_answers(self):
+        cache_file = Path("state") / "test_query_cache.json"
+        if cache_file.exists():
+            cache_file.unlink()
+
+        with patch.object(query_cache, "QUERY_CACHE_FILE", cache_file):
+            stored = query_cache.store_query_cache(
+                "Explain OSINT pivot workflow",
+                "Use cache, then Obsidian, then external ingestion.",
+                context="memory context",
+                metadata={"domain": "osint"},
+            )
+            exact = query_cache.lookup_query_cache("Explain OSINT pivot workflow")
+            similar = query_cache.lookup_query_cache("Explain OSINT pivot workflow steps")
+
+        self.assertTrue(stored["stored"])
+        self.assertIn("query_embedding", stored["entry"])
+        self.assertTrue(exact["hit"])
+        self.assertGreaterEqual(exact["confidence"], 0.85)
+        self.assertEqual(exact["next_layer"], "final")
+        self.assertTrue(similar["hit"])
+        self.assertIn("semantic_confidence", similar["best"])
+        self.assertIn("Obsidian", similar["best"]["result"])
+        cache_file.unlink(missing_ok=True)
+
+    def test_high_confidence_cache_hit_short_circuits_non_code_task(self):
+        events = []
+
+        class FakeMemory:
+            def __init__(self):
+                self.saved = []
+
+            def load(self):
+                return {}
+
+            def save(self, memory):
+                self.saved.append(dict(memory))
+
+            def append_event(self, memory, event):
+                memory.setdefault("actions", []).append(event)
+
+            def context_summary(self, memory):
+                return "context"
+
+        class ToolExecutor:
+            def execute(self, tool, args=None):
+                raise AssertionError(f"cache hit should not execute tool {tool}")
+
+        deps = loop.AgentDependencies(
+            tool_executor=ToolExecutor(),
+            memory=FakeMemory(),
+            call_agent=lambda agent, prompt, context="": "{}",
+            query_cache_lookup=lambda query: {
+                "enabled": True,
+                "hit": True,
+                "confidence": 0.95,
+                "best": {
+                    "query": query,
+                    "result": "cached grounded answer",
+                    "confidence": 0.95,
+                },
+                "matches": [
+                    {
+                        "query": query,
+                        "result": "cached grounded answer",
+                        "confidence": 0.95,
+                    }
+                ],
+            },
+        )
+
+        result = loop.run_agent_loop(
+            "Explain OSINT pivot workflow",
+            progress_callback=events.append,
+            dependencies=deps,
+        )
+
+        self.assertEqual(result, "cached grounded answer")
+        self.assertIn("query_cache", {event["type"] for event in events})
+        self.assertIn("complete", {event["type"] for event in events})
+
+    def test_osint_tool_registration_is_opt_in(self):
+        with patch.object(tool_executor, "OSINT_CRAWLER_ENABLED", False), patch.object(tool_executor, "_PLUGINS", None):
+            self.assertNotIn("fetch_external_data", tool_executor.build_tool_registry())
+            self.assertNotIn("crawl_osint_sources", tool_executor.build_tool_registry())
+
+        with patch.object(tool_executor, "OSINT_CRAWLER_ENABLED", True), patch.object(tool_executor, "_PLUGINS", None):
+            registry = tool_executor.build_tool_registry()
+            self.assertIn("fetch_external_data", registry)
+            self.assertIn("crawl_osint_sources", registry)
+
+    def test_osint_crawler_extracts_actionable_markdown_notes(self):
+        from tools import osint
+
+        payloads = {
+            "https://example.test/source": {
+                "url": "https://example.test/source",
+                "status_code": 200,
+                "content_type": "text/html",
+                "truncated": False,
+                "text": """
+                    Subscribe now. Advertisement.
+                    Tool usage: run nuclei -t cves/ against exposed services.
+                    Detection workflow: collect IOC domains, enrich with passive DNS, then write Sigma rules.
+                    Marketing paragraph with no technical value.
+                """,
+            }
+        }
+
+        with patch.object(osint, "fetch_external_data", side_effect=lambda url, **kwargs: payloads[url]):
+            result = osint.crawl_osint_sources(
+                "nuclei osint detection",
+                seeds=["https://example.test/source"],
+                max_sources=1,
+            )
+
+        self.assertEqual(result["notes_ready"], 1)
+        note = result["notes"][0]["content"]
+        self.assertIn("## Technical Extract", note)
+        self.assertIn("nuclei", note)
+        self.assertIn("Sigma", note)
+        self.assertNotIn("Subscribe now", note)
 
     def test_hermes_memory_can_mirror_vectors_to_qdrant(self):
         memory_file = Path("state") / "test_hermes_qdrant_memory.json"

@@ -193,11 +193,13 @@ def embed_text(text: str) -> list[float]:
 def _cosine(left: list[float], right: list[float]) -> float:
     if not left or not right:
         return 0.0
-    if _NUMPY:
-        a = np.array(left, dtype=np.float32)
-        b = np.array(right[:len(left)], dtype=np.float32)
-        return float(np.dot(a, b))
     size = min(len(left), len(right))
+    if size <= 0:
+        return 0.0
+    if _NUMPY:
+        a = np.array(left[:size], dtype=np.float32)
+        b = np.array(right[:size], dtype=np.float32)
+        return float(np.dot(a, b))
     return sum(left[index] * right[index] for index in range(size))
 
 

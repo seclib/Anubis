@@ -17,6 +17,25 @@ services:
       - anubis-net
 
   # =========================
+  # ⚡ REDIS REFLEX CACHE
+  # =========================
+  redis:
+    image: redis:7-alpine
+    container_name: anubis-redis
+    restart: unless-stopped
+
+    ports:
+      - "6379:6379"
+
+    volumes:
+      - redis_data:/data
+
+    command: redis-server --appendonly yes
+
+    networks:
+      - anubis-net
+
+  # =========================
   # 🤖 ANUBIS AGENT
   # =========================
   anubis-agent:
@@ -67,6 +86,10 @@ services:
       HERMES_MEMORY_BACKEND: qdrant
       QDRANT_URL: ${QDRANT_URL:-http://qdrant:6333}
       QDRANT_COLLECTION: hermes_memory
+      REDIS_CACHE_ENABLED: "true"
+      REDIS_CACHE_URL: ${REDIS_CACHE_URL:-redis://redis:6379/0}
+      REDIS_CACHE_NAMESPACE: anubis:query_cache
+      REDIS_CACHE_TTL_SECONDS: 604800
 
       # 🧠 fallback local memory (IMPORTANT FOR HEALING)
       HERMES_MEMORY_FILE: /workspace/state/hermes_memory.json
@@ -104,8 +127,13 @@ services:
 # =========================
 volumes:
   anubis-workspace:
+    name: anubis-workspace
   obsidian-vault:
+    name: obsidian-vault
   qdrant_data:
+    name: qdrant_data
+  redis_data:
+    name: redis_data
 
 
 # =========================
@@ -113,4 +141,5 @@ volumes:
 # =========================
 networks:
   anubis-net:
+    name: anubis-net
     driver: bridge

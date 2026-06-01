@@ -31,6 +31,17 @@ from runtime.streaming import (
     format_sse_event,
     short_text,
 )
+from crawler.schemas import CrawlRequest
+from crawler.service import get_crawler_service
+from intelligence.service import get_intelligence_service
+from knowledge.service import get_knowledge_service
+from retrieval.schemas import IngestRequest, RetrievalRequest
+from services.container import get_container
+from rag.service import get_rag_service
+from storage.redis import RedisStore
+from app.lifespan import initialize_app_state, shutdown_app_state
+from monitoring.metrics import metrics_snapshot
+from workers.maintenance_jobs import get_background_loop
 from config import (
     API_AUTH_REQUIRED,
     API_BASE_PATH,
@@ -53,6 +64,26 @@ _CHAT_COMPLETIONS_PATH = (
 )
 _AGENT_STREAM_PATH = f"{_API_PREFIX}/agent/stream" if _API_PREFIX else "/agent/stream"
 _HEALTH_API_PATH = f"{_API_PREFIX}/health" if _API_PREFIX else "/health"
+_HEALTH_READY_PATH = f"{_API_PREFIX}/health/ready" if _API_PREFIX else "/health/ready"
+_RAG_RETRIEVE_PATH = f"{_API_PREFIX}/rag/retrieve" if _API_PREFIX else "/rag/retrieve"
+_RAG_QUERY_PATH = f"{_API_PREFIX}/rag/query" if _API_PREFIX else "/rag/query"
+_RAG_INGEST_PATH = f"{_API_PREFIX}/rag/ingest" if _API_PREFIX else "/rag/ingest"
+_RAG_INGEST_OBSIDIAN_PATH = (
+    f"{_API_PREFIX}/rag/ingest/obsidian" if _API_PREFIX else "/rag/ingest/obsidian"
+)
+_CRAWL_JOBS_PATH = f"{_API_PREFIX}/crawl/jobs" if _API_PREFIX else "/crawl/jobs"
+_VAULT_HEALTH_PATH = f"{_API_PREFIX}/vault/health" if _API_PREFIX else "/vault/health"
+_VAULT_MAINTAIN_PATH = f"{_API_PREFIX}/vault/maintenance/run" if _API_PREFIX else "/vault/maintenance/run"
+_INTELLIGENCE_ANALYZE_PATH = (
+    f"{_API_PREFIX}/intelligence/analyze" if _API_PREFIX else "/intelligence/analyze"
+)
+_CACHE_HEALTH_PATH = f"{_API_PREFIX}/cache/health" if _API_PREFIX else "/cache/health"
+_CACHE_INVALIDATE_PATH = f"{_API_PREFIX}/cache/invalidate" if _API_PREFIX else "/cache/invalidate"
+_QDRANT_HEALTH_PATH = f"{_API_PREFIX}/qdrant/health" if _API_PREFIX else "/qdrant/health"
+_QDRANT_ENSURE_PATH = f"{_API_PREFIX}/qdrant/collections/ensure" if _API_PREFIX else "/qdrant/collections/ensure"
+_QDRANT_INDEX_PATH = f"{_API_PREFIX}/qdrant/index" if _API_PREFIX else "/qdrant/index"
+_METRICS_PATH = f"{_API_PREFIX}/admin/metrics" if _API_PREFIX else "/admin/metrics"
+_BACKGROUND_RUN_PATH = f"{_API_PREFIX}/background/run-once" if _API_PREFIX else "/background/run-once"
 
 
 class ChatMessage(BaseModel):
@@ -116,6 +147,12 @@ class ModelListResponse(BaseModel):
     data: list[ModelInfo]
 
 
+class IntelligenceAnalyzeRequest(BaseModel):
+    model_config = ConfigDict(extra="ignore")
+
+    text: str
+
+
 app = FastAPI(title="Anubis Agent API", version="1.0.0")
 app.add_middleware(
     CORSMiddleware,
@@ -124,6 +161,17 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.on_event("startup")
+async def startup() -> None:
+    logger.info("Starting Anubis FastAPI services")
+    initialize_app_state(app)
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    await shutdown_app_state(app)
 
 def _get_run_lock() -> asyncio.Lock:
     lock = getattr(app.state, "run_lock", None)
@@ -392,12 +440,27 @@ async def _stream_agent_events(task: str) -> Any:
 
 
 @app.get("/health")
-async def health() -> dict[str, str]:
-    return {"status": "ok"}
+async def health() -> dict[str, Any]:
+    return {"status": "ok", "service": "anubis"}
 
 
 if _HEALTH_API_PATH != "/health":
     app.add_api_route(_HEALTH_API_PATH, health, methods=["GET"])
+
+
+@app.get(_HEALTH_READY_PATH)
+async def readiness(request: Request) -> dict[str, Any]:
+    _check_api_key(request)
+    services = get_container()
+    redis_store = RedisStore()
+    return {
+        "status": "ready",
+        "startup": getattr(request.app.state, "startup_health", {}),
+        "services": services.health(),
+        "retrieval": services.rag.health(),
+        "redis": redis_store.health(),
+        "knowledge": services.knowledge.vault_health(),
+    }
 
 
 @app.get(_MODELS_PATH, response_model=ModelListResponse)
@@ -474,4 +537,123 @@ async def stream_agent_steps(payload: AgentStreamRequest, request: Request) -> A
     return await _stream_agent_events(task)
 
 
+@app.post(_RAG_RETRIEVE_PATH)
+@app.post(_RAG_QUERY_PATH)
+async def rag_retrieve(payload: RetrievalRequest, request: Request) -> dict[str, Any]:
+    _check_api_key(request)
+    service = get_rag_service()
+    return await asyncio.to_thread(
+        service.query,
+        payload.query,
+        top_k=payload.top_k,
+        filters=payload.filters,
+        generate_answer=payload.generate_answer,
+    )
 
+
+@app.post(_RAG_INGEST_PATH)
+async def rag_ingest(payload: IngestRequest, request: Request) -> dict[str, Any]:
+    _check_api_key(request)
+    service = get_rag_service()
+    return await asyncio.to_thread(
+        service.ingest,
+        title=payload.title,
+        content=payload.content,
+        source_url=payload.source_url,
+        folder=payload.folder,
+        metadata=payload.metadata,
+    )
+
+
+@app.post(_RAG_INGEST_OBSIDIAN_PATH)
+async def rag_ingest_obsidian(
+    request: Request,
+    limit: int | None = None,
+    force: bool = False,
+    index_qdrant: bool = True,
+) -> dict[str, Any]:
+    _check_api_key(request)
+    return await asyncio.to_thread(
+        get_rag_service().ingest_obsidian,
+        limit=limit,
+        force=force,
+        index_qdrant=index_qdrant,
+    )
+
+
+@app.post(_CRAWL_JOBS_PATH)
+async def crawl_job(payload: CrawlRequest, request: Request) -> dict[str, Any]:
+    _check_api_key(request)
+    service = get_crawler_service()
+    return await service.crawl(
+        query=payload.query,
+        seeds=payload.seeds,
+        max_pages=payload.max_pages,
+        max_depth=payload.max_depth,
+        ingest=payload.ingest,
+        workers=payload.workers,
+    )
+
+
+@app.get(_VAULT_HEALTH_PATH)
+async def vault_health(request: Request) -> dict[str, Any]:
+    _check_api_key(request)
+    return await asyncio.to_thread(get_knowledge_service().vault_health)
+
+
+@app.post(_VAULT_MAINTAIN_PATH)
+async def vault_maintain(request: Request, apply: bool = True) -> dict[str, Any]:
+    _check_api_key(request)
+    return await asyncio.to_thread(get_knowledge_service().maintain, apply=apply)
+
+
+@app.post(_INTELLIGENCE_ANALYZE_PATH)
+async def intelligence_analyze(payload: IntelligenceAnalyzeRequest, request: Request) -> dict[str, Any]:
+    _check_api_key(request)
+    return get_intelligence_service().analyze(payload.text)
+
+
+@app.get(_CACHE_HEALTH_PATH)
+async def cache_health(request: Request) -> dict[str, Any]:
+    _check_api_key(request)
+    return get_container().cache.health()
+
+
+@app.post(_CACHE_INVALIDATE_PATH)
+async def cache_invalidate(
+    request: Request,
+    query: str | None = None,
+    include_embeddings: bool = False,
+) -> dict[str, Any]:
+    _check_api_key(request)
+    return get_container().cache.invalidate(query=query, include_embeddings=include_embeddings)
+
+
+@app.get(_QDRANT_HEALTH_PATH)
+async def qdrant_health(request: Request) -> dict[str, Any]:
+    _check_api_key(request)
+    return get_rag_service().health().get("qdrant", {})
+
+
+@app.post(_QDRANT_ENSURE_PATH)
+async def qdrant_ensure(request: Request, recreate: bool = False) -> dict[str, Any]:
+    _check_api_key(request)
+    return await asyncio.to_thread(get_rag_service().ensure_qdrant, recreate=recreate)
+
+
+@app.post(_QDRANT_INDEX_PATH)
+async def qdrant_index(request: Request, limit: int | None = None) -> dict[str, Any]:
+    _check_api_key(request)
+    return await asyncio.to_thread(get_rag_service().index_qdrant, limit=limit)
+
+
+@app.get(_METRICS_PATH)
+async def admin_metrics(request: Request) -> dict[str, Any]:
+    _check_api_key(request)
+    return await asyncio.to_thread(metrics_snapshot)
+
+
+@app.post(_BACKGROUND_RUN_PATH)
+async def background_run_once(request: Request) -> dict[str, Any]:
+    _check_api_key(request)
+    return await get_background_loop().run_once()
