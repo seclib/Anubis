@@ -3,6 +3,8 @@ import { createRoot } from "react-dom/client";
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { chat, listNotes, NoteSummary, RagChunk, readNote, writeNote } from "./api";
+import { BrainDashboard } from "./BrainDashboard";
+import { SkillGraphView } from "./SkillGraphView";
 import "./styles.css";
 
 type ServiceStatus = {
@@ -252,6 +254,10 @@ function App() {
           </div>
         </section>
       </section>
+
+      <BrainDashboard launcher={launcher} launcherLogs={logs} />
+
+      <SkillGraphView />
 
       <section className="workspace-shell">
         <aside className="vault-pane">

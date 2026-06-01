@@ -32,6 +32,15 @@ from agent.self_rewriting import (
     simulate_self_rewrite_patch,
     validate_self_rewrite_patch,
 )
+from agent.self_modifying_runtime import (
+    DynamicFunctionRegistry,
+    SelfObservationLayer,
+    VersionStore,
+    apply_runtime_patch,
+    rollback_runtime_patch,
+    runtime_architecture,
+    validate_runtime_patch,
+)
 from agent.skill_ecosystem_graph import (
     build_skill_ecosystem_graph,
     to_cytoscape_graph,
@@ -898,6 +907,78 @@ class AutonomousLoopTest(unittest.TestCase):
         self.assertEqual(result["application"]["status"], "applied")
         self.assertFalse(result["application"]["source_code_modified"])
         self.assertEqual(memory["self_rewriting"]["last_patch"], result["patch"])
+
+    def test_self_modifying_runtime_hot_swaps_policy_and_rolls_back(self):
+        observer = SelfObservationLayer()
+        registry = DynamicFunctionRegistry(observer)
+        versions = VersionStore()
+
+        def retrieve_context(query: str) -> str:
+            return f"context:{query}"
+
+        registry.register(
+            "retrieve_context",
+            retrieve_context,
+            behavior="Retrieve context directly from available memory.",
+        )
+        patch = {
+            "target_function": "retrieve_context",
+            "reason": "Repeated empty retrieval calls were observed.",
+            "current_behavior": "The function accepts calls without explicit preflight checks.",
+            "proposed_behavior": "Require preflight validation before retrieval and retry once after transient failures.",
+            "expected_improvement": "Reduce empty retrieval calls while preserving live execution.",
+            "risk_level": "low",
+        }
+
+        validation = validate_runtime_patch(patch, registry)
+        self.assertEqual(validation["status"], "approved")
+        applied = apply_runtime_patch(patch, registry, versions, validation=validation)
+
+        self.assertTrue(applied["success"])
+        self.assertEqual(applied["status"], "applied")
+        self.assertEqual(registry.get("retrieve_context").version, 2)
+        self.assertTrue(registry.get("retrieve_context").strategy.require_preflight)
+        self.assertEqual(registry.execute("retrieve_context")["success"], False)
+        self.assertEqual(registry.execute("retrieve_context", "skill graph")["output"], "context:skill graph")
+        self.assertGreaterEqual(observer.metrics()["decisions"], 3)
+
+        rollback = rollback_runtime_patch("retrieve_context", registry, versions)
+        self.assertTrue(rollback["success"])
+        self.assertEqual(registry.get("retrieve_context").version, 1)
+        self.assertFalse(registry.get("retrieve_context").strategy.require_preflight)
+
+    def test_self_modifying_runtime_rejects_unsafe_or_unapproved_patch(self):
+        registry = DynamicFunctionRegistry()
+        versions = VersionStore()
+        registry.register("plan_steps", lambda task: [task], behavior="Plan task steps.")
+        patch = {
+            "target_function": "plan_steps",
+            "reason": "Try an unsafe runtime mutation.",
+            "current_behavior": "Planning is validated.",
+            "proposed_behavior": "Bypass approval and eval('malicious') while planning.",
+            "expected_improvement": "Faster planning.",
+            "risk_level": "high",
+        }
+
+        validation = validate_runtime_patch(patch, registry)
+        self.assertFalse(validation["success"])
+        self.assertIn("unsupported risk_level", "; ".join(validation["schema_validation"]["issues"]))
+        result = apply_runtime_patch(patch, registry, versions, validation=validation)
+
+        self.assertEqual(result["status"], "rejected")
+        self.assertEqual(registry.get("plan_steps").version, 1)
+        self.assertEqual(versions.snapshots, [])
+
+    def test_self_modifying_runtime_architecture_documents_safety_model(self):
+        architecture = runtime_architecture()
+
+        self.assertIn("agent_core", architecture)
+        self.assertIn("self_observation_layer", architecture)
+        self.assertIn("patch_generation_system", architecture)
+        self.assertIn("validation_pipeline", architecture)
+        self.assertIn("hot_swap_execution", architecture)
+        self.assertIn("versioning", architecture)
+        self.assertIn("rollback snapshot", " ".join(architecture["safety_model"]))
 
     def test_skill_ecosystem_graph_builds_nodes_edges_clusters_and_visuals(self):
         with tempfile.TemporaryDirectory() as tmp:

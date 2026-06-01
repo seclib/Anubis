@@ -49,3 +49,36 @@ sudo apt install libwebkit2gtk-4.1-dev libjavascriptcoregtk-4.1-dev libsoup-3.0-
 ```
 
 Node/npm are required for the Vite frontend build.
+
+## Desktop Menu Integration
+
+Anubis includes a freedesktop-compatible launcher for GNOME, KDE, and XFCE on
+Debian, Ubuntu, and Kali Linux.
+
+Install the launcher for the current user:
+
+```bash
+scripts/install_desktop_entry.sh
+```
+
+The installer copies:
+
+- `Anubis.desktop` to `~/.local/share/applications/`
+- `assets/icons/anubis.svg` to `~/.local/share/icons/hicolor/scalable/apps/`
+- `scripts/launch_anubis_desktop.sh` as the executable launcher wrapper
+
+It also refreshes the desktop and icon caches when `update-desktop-database`,
+`gtk-update-icon-cache`, or `xdg-desktop-menu` are available.
+
+Install paths are configurable:
+
+```bash
+ANUBIS_INSTALL_DIR=/opt/anubis \
+ANUBIS_LAUNCHER_SCRIPT="$HOME/.local/bin/anubis-desktop-launcher" \
+ANUBIS_ICON_SOURCE=/opt/anubis/assets/icons/anubis.svg \
+scripts/install_desktop_entry.sh
+```
+
+The launcher wrapper first tries a built Tauri binary under
+`desktop/src-tauri/target`. If no binary exists and development tools are
+available, it falls back to `cargo tauri dev`.

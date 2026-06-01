@@ -1,512 +1,146 @@
-# Anubis
+# Anubis Desktop OS
 
-Agent CLI autonome local inspire des systemes type Claude Code, Hermes CLI et OpenDevin.
+Anubis Desktop OS is a local AI workspace for notes, memory, and an assistant that helps you organize knowledge and work through tasks.
 
-Anubis execute des taches de developpement avec Ollama, une boucle agent, des tools Linux, une memoire locale, une API compatible OpenAI et une interface terminal interactive.
+It runs on your Linux computer and gives you a desktop app where you can:
 
-Le projet est en phase de stabilisation architecture. La priorite actuelle est la robustesse, pas l'ajout de nouvelles fonctionnalites.
+- write and edit notes
+- ask an AI assistant questions
+- save useful knowledge into memory
+- see system health at a glance
+- explore skills, agents, and memory through dashboard views
 
-## Objectifs
+![Anubis Desktop OS dashboard](docs/screenshots/readme-dashboard.png)
 
-- Executer localement avec Ollama, sans dependance cloud obligatoire.
-- Fournir un agent CLI capable de lire, modifier, tester et analyser un projet.
-- Garder une architecture maintenable : agent, tools, executor, memory et LLM doivent rester separes.
-- Eviter les circular imports et les dependances bidirectionnelles.
-- Garantir qu'une execution agent retourne toujours une reponse finale utilisateur.
-- Preparer un systeme extensible avec plugins, multi-agents et streaming propre.
+## Who It Is For
 
-## Etat Actuel
+Anubis is for people who want a local AI workspace that feels more like a personal operating desk than a chat box.
 
-Anubis contient deja :
+You can use it for:
 
-- une boucle agent autonome dans `agent/loop.py`
-- une integration Ollama dans `llm/ollama.py`
-- un executor de tools dans `executor/tool_executor.py`
-- des tools filesystem, shell, git, repo, memoire et developpement autonome
-- une memoire courte/longue dans `memory/`
-- une API FastAPI compatible OpenAI dans `app/main.py`
-- une API HTTP alternative dans `api/openai_server.py`
-- une interface CLI riche dans `anubis_cli.py`
-- un mode Docker avec Qdrant optionnel
-- un jeu de tests d'autonomie dans `tests/test_loop_autonomy.py`
+- project notes
+- research collections
+- personal knowledge
+- planning
+- summaries
+- AI-assisted writing
+- local experimentation
 
-Point important : le projet n'a pas actuellement de circular imports critiques detectes entre les couches principales. Le risque principal est plutot la concentration de responsabilites dans certains modules, surtout `agent/loop.py` et `anubis_cli.py`.
+## Key Features
 
-## Architecture Actuelle
+### Desktop Launcher
 
-```text
-.
-├── agent/
-│   ├── loop.py              # boucle agent principale
-│   ├── dependencies.py      # injection de dependances
-│   ├── prompts.py           # prompts systeme
-│   ├── parser.py            # parsing des actions JSON
-│   ├── planner.py           # planification simple
-│   ├── multi_agent.py       # profils agents et routage multi-agent
-│   ├── orchestrator_agent.py
-│   ├── coder_agent.py
-│   ├── reviewer_agent.py
-│   ├── tester_agent.py
-│   └── debugger_agent.py
-├── app/
-│   └── main.py              # API FastAPI
-├── api/
-│   └── openai_server.py     # serveur OpenAI-compatible alternatif
-├── core/
-│   └── workspace.py         # securisation des chemins workspace
-├── executor/
-│   └── tool_executor.py     # execution et registre des tools
-├── llm/
-│   └── ollama.py            # appels Ollama /api/chat
-├── memory/
-│   ├── state.py             # memoire runtime JSON
-│   ├── hermes.py            # memoire long terme
-│   └── vector.py            # memoire vectorielle
-├── tools/
-│   ├── filesystem.py
-│   ├── terminal.py
-│   ├── repo.py
-│   ├── sandbox.py
-│   ├── git_autonomy.py
-│   ├── dynamic_tools.py
-│   └── autonomous_developer.py
-├── tests/
-│   └── test_loop_autonomy.py
-├── anubis_cli.py            # terminal interactif
-├── main.py                  # entree CLI/API historique
-├── config.py                # configuration centrale
-├── docker-compose.yml
-└── requirements.txt
-```
+Open Anubis from your application menu without typing commands.
 
-## Regles D'Architecture
+![Anubis in the application menu](docs/screenshots/readme-application-menu.png)
 
-Ces regles doivent rester vraies pour garder Anubis maintenable.
+### Brain Dashboard
 
-```text
-CLI/API        -> agent runtime
-agent          -> llm, executor, memory, core
-executor       -> tools, core
-tools          -> core uniquement
-memory         -> core uniquement
-llm            -> core/config uniquement
-core           -> aucune couche domaine
-```
+See whether Anubis is running, how much memory is available, what the assistant system is doing, and what recent activity happened.
 
-Interdictions :
+![Brain Dashboard](docs/screenshots/readme-brain-dashboard.png)
 
-- `tools` ne doit jamais importer `agent`.
-- `executor` ne doit jamais importer `agent`.
-- `memory` ne doit jamais importer `agent`, `executor` ou `tools`.
-- `llm` ne doit pas stocker d'etat conversationnel.
-- `cli` ne doit pas contenir de logique de raisonnement agent.
-- un tool ne doit pas appeler directement un autre tool via l'agent.
-- toute execution tool doit passer par l'executor.
-- toute sortie utilisateur finale doit passer par la boucle/finalisation agent.
+### Notes And Memory
 
-## Architecture Cible
+Write Markdown notes in the vault. Anubis can use those notes as memory when answering questions.
 
-La cible de stabilisation est une architecture plus proche d'un produit agent local.
+![Vault and note editor](docs/screenshots/readme-vault-editor.png)
 
-```text
-anubis/
-├── core/
-│   ├── config.py
-│   ├── events.py
-│   ├── errors.py
-│   ├── logging.py
-│   └── workspace.py
-├── runtime/
-│   ├── container.py
-│   └── dependencies.py
-├── agent/
-│   ├── loop.py
-│   ├── state.py
-│   ├── router.py
-│   ├── planner.py
-│   ├── reflector.py
-│   ├── finalizer.py
-│   ├── safeguards.py
-│   └── prompts/
-├── orchestrator/
-│   ├── orchestrator.py
-│   ├── agent_registry.py
-│   ├── model_policy.py
-│   └── task_graph.py
-├── executor/
-│   ├── executor.py
-│   ├── registry.py
-│   ├── schemas.py
-│   └── permissions.py
-├── tools/
-├── memory/
-│   ├── short_term.py
-│   ├── long_term.py
-│   ├── vector.py
-│   ├── compaction.py
-│   └── schemas.py
-├── llm/
-│   ├── ollama.py
-│   ├── messages.py
-│   ├── model_registry.py
-│   └── streaming.py
-├── plugins/
-│   ├── loader.py
-│   ├── manifest.py
-│   └── sandbox.py
-├── cli/
-│   ├── main.py
-│   ├── renderer.py
-│   ├── commands.py
-│   ├── session.py
-│   └── streaming.py
-└── api/
-    ├── routes.py
-    ├── schemas.py
-    └── stream.py
-```
+### AI Assistant
 
-## Boucle Agent Recommandee
+Ask questions, summarize notes, turn text into checklists, and use your saved knowledge while working.
 
-```text
-user input
-  -> observe
-  -> route
-  -> plan if needed
-  -> act with tools if needed
-  -> reflect
-  -> finalize
-  -> user response
-```
+![AI assistant panel](docs/screenshots/readme-ai-assistant.png)
 
-Invariant de production :
+### Skill And Cognitive Graph Views
 
-> Une execution agent doit toujours atteindre une etape `finalize`, meme si un tool echoue, si Ollama retourne une reponse invalide, si la memoire est indisponible ou si la limite de steps est atteinte.
+Explore how skills, agents, memory groups, and relationships connect inside Anubis.
 
-Les safeguards attendus :
+![Cognitive Graph View](docs/screenshots/readme-cognitive-graph.png)
 
-- `MAX_STEPS`
-- `MAX_RETRIES`
-- `MAX_TOOL_RETRIES`
-- timeout par commande shell
-- limite de taille stdout/stderr
-- detection de non-progres
-- reponse finale obligatoire
-- erreurs structurees et journalisees
+### Local First
 
-## Installation Locale
+Anubis is designed to run on your own machine. Your notes and local state live inside the Anubis folder unless you configure another location.
 
-### 1. Prerequis
+## Installation
 
-- Linux
-- Python 3.10+
-- Ollama
-- Git
-- Docker optionnel
-
-### 2. Installer les dependances Python
+The easiest installation path is the one-click installer:
 
 ```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -r requirements.txt
+./install.sh
 ```
 
-### 3. Installer le modele Ollama recommande
+The installer prepares the app, creates the local environment, initializes the vault, configures local memory services, and installs the desktop launcher.
+
+For installer options:
 
 ```bash
-ollama pull qwen2.5-coder:7b
-ollama pull bge-m3
+./install.sh --help
 ```
 
-Demarrer Ollama si necessaire :
+Common options:
 
 ```bash
-ollama serve
+./install.sh --no-qdrant
+./install.sh --no-system
+./install.sh --build-desktop
 ```
 
-### 4. Configurer l'environnement
+## Quick Start
+
+1. Install Anubis:
+
+   ```bash
+   ./install.sh
+   ```
+
+2. Open your application menu.
+
+3. Search for **Anubis Desktop OS**.
+
+4. Click the Anubis icon.
+
+5. In the app, click **Start Anubis** if the system is stopped.
+
+6. Open a note from the **Vault** panel.
+
+7. Ask the assistant a question in the **Agent** panel.
+
+![Anubis ready to use](docs/screenshots/readme-ready.png)
+
+## Desktop Launcher
+
+If you only want to install or refresh the desktop menu entry, run:
 
 ```bash
-cp .env.example .env
+scripts/install_desktop_entry.sh
 ```
 
-Configuration minimale :
+This installs:
 
-```bash
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5-coder:7b
-OLLAMA_FALLBACK_MODEL=qwen2.5-coder:7b
-PROJECT_ROOT=.
-WORKSPACE_ROOT=.
-```
+- the application menu entry
+- the Anubis icon
+- the launcher wrapper
 
-## Lancer Anubis
+Supported desktop environments include GNOME, KDE, and XFCE on Debian, Ubuntu, and Kali Linux.
 
-### Terminal interactif
+## Backing Up Your Data
 
-```bash
-python3 anubis_cli.py
-```
+To back up your Anubis workspace, copy these folders from the Anubis folder:
 
-Commandes utiles dans le terminal :
+- `vault`
+- `state`
+- `.agents`
 
-```text
-/help                 afficher les commandes
-/run <tache>          lancer la boucle agent autonome
-/exec <commande>      executer une commande shell controlee
-/status              afficher l'etat memoire
-/clear               vider le contexte CLI
-/exit                quitter
-```
+Close Anubis before copying them.
 
-### Agent depuis Python
+## Documentation
 
-```python
-from agent.loop import run_agent_loop
+- User guide: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
+- Desktop launcher: [docs/DESKTOP_LAUNCHER.md](docs/DESKTOP_LAUNCHER.md)
+- Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
+- Local API notes: [docs/LOCAL_API.md](docs/LOCAL_API.md)
 
-result = run_agent_loop("Analyse le projet et propose les priorites de refactor")
-print(result)
-```
+## Project Status
 
-### API locale
-
-```bash
-python3 main.py serve
-```
-
-Endpoint par defaut :
-
-```text
-http://localhost:8000/v1
-```
-
-Endpoints principaux :
-
-```text
-GET  /v1/models
-GET  /v1/models/{model_id}
-POST /v1/chat/completions
-POST /v1/agent/stream
-GET  /health
-```
-
-Exemple de stream agent :
-
-```bash
-curl -N http://localhost:8000/v1/agent/stream \
-  -H "Content-Type: application/json" \
-  -d '{"task":"Inspecte le projet et resume les points d entree"}'
-```
-
-### Docker
-
-```bash
-docker compose up --build
-```
-
-Le compose Anubis lance :
-
-- `anubis-agent` sur `http://localhost:8000/v1`
-- `qdrant` sur `http://localhost:6333`
-
-Qdrant est un service vectoriel partage. Il reste independant d'Anubis : Anubis ne le cree pas lui-meme, ne declare aucun `depends_on`, et le contacte uniquement via `QDRANT_URL`.
-
-```bash
-curl http://localhost:6333/collections
-```
-
-Dans Docker, Anubis contacte Qdrant via le DNS de service Docker sur le reseau `anubis-net` :
-
-```text
-QDRANT_URL=http://qdrant:6333
-```
-
-Pour une execution hors conteneur, utilisez `QDRANT_URL=http://localhost:6333`.
-
-## Configuration Principale
-
-Variables importantes :
-
-```bash
-# Ollama
-OLLAMA_BASE_URL=http://localhost:11434
-OLLAMA_MODEL=qwen2.5-coder:7b
-OLLAMA_FALLBACK_MODEL=qwen2.5-coder:7b
-OLLAMA_NUM_CTX=8192
-OLLAMA_KEEP_ALIVE=1h
-LLM_TEMPERATURE=0.2
-LLM_MAX_TOKENS=4096
-
-# Agents
-ORCHESTRATOR_AGENT_MODEL=$OLLAMA_MODEL
-PLANNER_AGENT_MODEL=$OLLAMA_MODEL
-CODER_AGENT_MODEL=$OLLAMA_MODEL
-REVIEWER_AGENT_MODEL=$OLLAMA_MODEL
-TESTER_AGENT_MODEL=$OLLAMA_MODEL
-DEBUGGER_AGENT_MODEL=$OLLAMA_MODEL
-MEMORY_AGENT_MODEL=$OLLAMA_MODEL
-
-# Loop
-MAX_STEPS=30
-MAX_RETRIES=3
-MAX_TOOL_RETRIES=3
-CONTINUOUS_RUN=false
-
-# Tools
-TOOL_COMMAND_TIMEOUT=120
-TOOL_COMMAND_MAX_LENGTH=4000
-TOOL_OUTPUT_MAX_CHARS=20000
-TOOL_AUDIT_FILE=state/tool_audit.log
-
-# Memory
-HERMES_MEMORY_ENABLED=true
-HERMES_MEMORY_BACKEND=local
-HERMES_MEMORY_FILE=state/hermes_memory.json
-EMBEDDING_MODEL=bge-m3
-VECTOR_STORE_FILE=state/vector_store.json
-
-# API
-API_HOST=127.0.0.1
-API_PORT=8000
-API_BASE_PATH=/v1
-API_AUTH_REQUIRED=false
-API_MODEL_ID=claude-code-local
-```
-
-## Tools Disponibles
-
-Familles de tools :
-
-- filesystem : lire, ecrire, lister des fichiers
-- terminal : executer des commandes shell controlees
-- repo : introspection projet, detection frameworks, entrypoints
-- git : status, validations, commit autonome, rollback
-- vector memory : indexation repo et recherche semantique
-- Hermes memory : stockage et recherche memoire long terme
-- dynamic tools : creation et chargement de tools Python controles
-- autonomous developer : build, tests, serveurs locaux, scaffolding
-
-Tous les tools doivent rester atomiques, testables et sans dependance vers `agent`.
-
-## Memoire
-
-Anubis utilise plusieurs niveaux de memoire :
-
-- `state/runtime.json` : etat runtime, historique, progression
-- `state/hermes_memory.json` : memoire long terme locale
-- `state/vector_store.json` : index vectoriel local
-- Qdrant externe optionnel via `HERMES_MEMORY_BACKEND=qdrant` et `QDRANT_URL`
-- Obsidian optionnel via `OBSIDIAN_VAULT_PATH`
-
-Regles de stabilite :
-
-- les messages doivent toujours avoir un format clair `role/content`
-- la memoire ne doit pas contenir de logique agent
-- la compaction doit eviter les contextes trop longs
-- les erreurs memoire ne doivent jamais bloquer la reponse finale
-
-## Observabilite
-
-Fichiers utiles :
-
-```text
-state/cli.log
-state/tool_audit.log
-state/runtime.json
-```
-
-Bonnes pratiques attendues :
-
-- logs structures par run agent
-- events de streaming typables
-- audit de chaque tool call
-- distinction claire entre erreur tool, erreur LLM, erreur memory et erreur loop
-- conservation d'un `run_id`, `step_id` et `tool_call_id`
-
-## Tests Et Verification
-
-Lancer les tests :
-
-```bash
-python3 -m unittest tests/test_loop_autonomy.py
-```
-
-Verifier les imports Python :
-
-```bash
-python3 -m py_compile \
-  config.py \
-  llm/ollama.py \
-  agent/prompts.py \
-  agent/loop.py \
-  executor/tool_executor.py \
-  anubis_cli.py
-```
-
-Verifier la configuration Docker :
-
-```bash
-docker compose config
-```
-
-Verifier Ollama :
-
-```bash
-ollama list
-curl http://localhost:11434/api/tags
-```
-
-## Roadmap De Stabilisation
-
-Priorite 1 : boucle agent robuste
-
-- extraire `agent/router.py`
-- extraire `agent/state.py`
-- extraire `agent/finalizer.py`
-- ajouter un etat final obligatoire
-- rendre les side effects git non bloquants pour la reponse finale
-
-Priorite 2 : contrats internes
-
-- creer `ToolCall` et `ToolResult`
-- creer `AgentEvent`
-- creer `MemoryMessage`
-- normaliser les messages LLM
-- ajouter des erreurs domaine explicites
-
-Priorite 3 : executor et plugin system
-
-- separer `executor/executor.py` et `executor/registry.py`
-- deplacer les permissions tool dans un module dedie
-- ajouter manifest plugin
-- permettre activation/desactivation de tools
-
-Priorite 4 : CLI production
-
-- decouper `anubis_cli.py`
-- isoler renderer, commands, session et streaming
-- afficher les tool calls via events structures
-- garder la logique agent hors du terminal
-
-Priorite 5 : observabilite
-
-- logs JSON optionnels
-- traces par run
-- metriques par tool
-- rapport d'echec final explicite
-
-## Principes De Developpement
-
-- Robustesse avant nouvelles fonctionnalites.
-- Dependency injection avant imports globaux.
-- LLM stateless.
-- Memory isolee.
-- Executor independant.
-- Tools sans connaissance de l'agent.
-- Une seule direction de dependance.
-- Une reponse finale utilisateur est obligatoire.
-
-## Statut
-
-Anubis est un prototype avance d'agent autonome local. Il est fonctionnel, mais la prochaine etape importante est la stabilisation de son architecture interne pour le rendre production-ready.
+Anubis is an active local AI desktop project. The current focus is making the desktop app, memory system, assistant workflow, and installer reliable and easy to use.

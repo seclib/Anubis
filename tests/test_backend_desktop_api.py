@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from backend.api.routes import local, notes, rag
+from backend.api.routes import brain, local, notes, rag, skills
 from backend.main import app
 from backend.vault.service import VaultService
 
@@ -18,9 +18,13 @@ class BackendDesktopApiTest(unittest.TestCase):
         local.reset_route_state()
         notes.reset_route_state()
         rag.reset_route_state()
+        skills.reset_route_state()
+        brain.reset_route_state()
         self.patchers = [
             patch("backend.api.routes.local.get_vault", return_value=self.vault),
             patch("backend.api.routes.notes.get_vault", return_value=self.vault),
+            patch("backend.api.routes.skills.get_skills_dir", return_value=self.vault_path / "skills"),
+            patch("backend.api.routes.brain._vault", return_value=self.vault),
         ]
         for patcher in self.patchers:
             patcher.start()
@@ -71,6 +75,47 @@ class BackendDesktopApiTest(unittest.TestCase):
         payload = response.json()
         self.assertEqual(payload["status"], "ready")
         self.assertIn("qdrant_collection", payload)
+
+    def test_skill_graph_api_exposes_skills_edges_and_markdown(self) -> None:
+        skills_dir = self.vault_path / "skills"
+        skills_dir.mkdir()
+        (skills_dir / "memory_skill.md").write_text(
+            "---\nname: memory_skill\nobjective: Preserve state.\n---\n# Memory Skill\n",
+            encoding="utf-8",
+        )
+        (skills_dir / "retrieval_skill.md").write_text(
+            "---\nname: retrieval_skill\ndependencies:\n  - memory_skill\n---\n# Retrieval Skill\n",
+            encoding="utf-8",
+        )
+
+        graph_response = self.client.get("/api/skill-graph")
+        self.assertEqual(graph_response.status_code, 200)
+        graph = graph_response.json()
+        self.assertIn("nodes", graph)
+        self.assertIn("edges", graph)
+        self.assertTrue(any(node["id"] == "retrieval_skill" for node in graph["nodes"]))
+        self.assertTrue(any(edge["type"] == "depends_on" for edge in graph["edges"]))
+        self.assertTrue(any("Retrieval Skill" in node.get("markdown", "") for node in graph["nodes"]))
+
+        skills_response = self.client.get("/api/skills")
+        self.assertEqual(skills_response.status_code, 200)
+        self.assertEqual({node["type"] for node in skills_response.json()}, {"skill"})
+
+    def test_brain_snapshot_exposes_dashboard_foundation(self) -> None:
+        self.vault.write_note("notes/dashboard.md", "# Dashboard\n\nObserve the system.")
+        response = self.client.get("/brain/snapshot")
+
+        self.assertEqual(response.status_code, 200)
+        payload = response.json()
+        self.assertIn("system_health", payload)
+        self.assertIn("memory", payload)
+        self.assertIn("agent_activity", payload)
+        self.assertIn("architecture", payload)
+        self.assertEqual(payload["memory"]["notes"], 1)
+        self.assertGreaterEqual(payload["memory"]["chunks"], 1)
+        self.assertIn("backend", payload["system_health"])
+        self.assertTrue(payload["agent_activity"]["active_agents"])
+        self.assertEqual(payload["architecture"]["live_updates"], "WebSocket /brain/ws")
 
 
 if __name__ == "__main__":
