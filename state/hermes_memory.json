@@ -2,7 +2,7 @@
   "version": 1,
   "identity": "Hermes",
   "created_at": "2026-05-28T08:58:11.590472+00:00",
-  "updated_at": "2026-05-28T10:17:02.976714+00:00",
+  "updated_at": "2026-06-01T06:01:18.901284+00:00",
   "entries": [
     {
       "id": "hermes-20260528-085811-590480",
@@ -629,6 +629,51 @@
         "memory-based-ai",
         "self-improvement",
         "user-preference",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260601-055940-293706",
+      "created_at": "2026-06-01T05:59:40.293720+00:00",
+      "updated_at": "2026-06-01T05:59:40.293722+00:00",
+      "summary": "The user defines Anubis as a Loop Cognition Core that must run MEMORY -> ACTION -> NEW MEMORY for every interaction.",
+      "task": "Adopt Loop Cognition Core operating contract",
+      "result": "Anubis interactions should retrieve RAG/Qdrant and Markdown memory first, decide an action, execute through available agents/tools, then write structured durable memory and index it back into retrieval when possible.",
+      "lessons": [
+        "Every non-trivial interaction should start by retrieving relevant Qdrant/RAG and Markdown/Obsidian context.",
+        "Action selection should explicitly choose among answering, writing a note, calling writer/retriever/indexer agents, generating a skill, or triggering memory compression.",
+        "After execution, extract reusable learning into structured Markdown and inject it into vector retrieval/Qdrant when available."
+      ],
+      "tags": [
+        "loop-cognition-core",
+        "memory-action-new-memory",
+        "rag",
+        "qdrant",
+        "obsidian",
+        "agent-policy",
+        "continuous-learning",
+        "user-preference",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260601-060118-901260",
+      "created_at": "2026-06-01T06:01:18.901275+00:00",
+      "updated_at": "2026-06-01T06:01:18.901277+00:00",
+      "summary": "Anubis now has a Skill Evolution Engine with a skill graph and fusion skill.",
+      "task": "Create Skill Evolution Engine artifacts",
+      "result": "Created .agents/skills/loop-cognition-core.md, skill-evolution-engine.md, cognitive-skill-evolution-loop.md, and evolution-tree.md. The fusion skill combines memory-loop execution with skill evolution so repeated behavior becomes indexed reusable capability.",
+      "lessons": [
+        "Skills should be Markdown artifacts with name, objective, context, procedure, dependencies, and expected output.",
+        "Skill evolution should track both evolution edges and fusion edges.",
+        "The cognitive skill evolution loop fuses MEMORY -> ACTION -> NEW MEMORY with skill creation and indexing."
+      ],
+      "tags": [
+        "skills",
+        "skill-evolution-engine",
+        "fusion",
+        "evolution-tree",
+        "agent-policy",
         "high"
       ]
     }

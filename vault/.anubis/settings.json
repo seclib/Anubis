@@ -1,0 +1,6 @@
+{
+  "schema_version": 1,
+  "vault_name": "Anubis Vault",
+  "notes_dir": "notes",
+  "assets_dir": "assets"
+}

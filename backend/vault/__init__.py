@@ -1,0 +1,1 @@
+"""Markdown vault access."""
