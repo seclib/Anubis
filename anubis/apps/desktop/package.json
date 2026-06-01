@@ -4,9 +4,10 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "vite --host 127.0.0.1 --port 5173",
     "build": "tsc && vite build",
-    "tauri": "tauri"
+    "tauri": "tauri",
+    "tauri-dev": "npm run tauri -- dev"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.1.1",

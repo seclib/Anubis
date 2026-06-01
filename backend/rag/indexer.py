@@ -21,3 +21,15 @@ class RagIndexer:
         self.store.upsert_chunks(chunks)
         logger.info("reindexed vault chunks=%s", len(chunks))
         return len(chunks)
+
+    def index_note(self, note_path: str) -> int:
+        content = self.vault.read_note(note_path)
+        chunks = chunk_note(note_path, content)
+        self.store.delete_path(note_path)
+        self.store.upsert_chunks(chunks)
+        logger.info("indexed note path=%s chunks=%s", note_path, len(chunks))
+        return len(chunks)
+
+    def delete_note(self, note_path: str) -> None:
+        self.store.delete_path(note_path)
+        logger.info("removed note vectors path=%s", note_path)

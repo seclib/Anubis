@@ -1,0 +1,14 @@
+{
+  "name": "anubis-obsidian-plugin",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "build": "tsc --noEmit --skipLibCheck && esbuild src/main.ts --bundle --external:obsidian --format=cjs --target=es2018 --outfile=main.js"
+  },
+  "devDependencies": {
+    "@types/node": "^20.14.10",
+    "esbuild": "^0.23.0",
+    "obsidian": "^1.6.5",
+    "typescript": "^5.5.3"
+  }
+}

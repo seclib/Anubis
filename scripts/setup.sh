@@ -226,6 +226,18 @@ setup_python() {
   if [[ -f backend/requirements.txt ]]; then
     run python -m pip install -r backend/requirements.txt
   fi
+  for package in \
+    anubis/kernel \
+    anubis/packages/prompt-engine \
+    anubis/packages/memory-sdk \
+    anubis/services/tools \
+    anubis/services/rag \
+    anubis/services/ai-core
+  do
+    if [[ -f "$package/pyproject.toml" ]]; then
+      run python -m pip install -e "$package"
+    fi
+  done
   ok "Python backend dependencies installed."
 }
 
@@ -237,6 +249,18 @@ setup_frontend() {
 
   if ! need_command npm; then
     warn "npm is not available. Desktop dependencies were not installed."
+    return 0
+  fi
+
+  if ! need_command node; then
+    warn "node is not available. Desktop dependencies were not installed."
+    return 0
+  fi
+
+  local node_major
+  node_major="$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf '0')"
+  if ((node_major < 20)); then
+    warn "Node.js 20 or newer is required for Vite/Tauri. Found: $(node --version)"
     return 0
   fi
 

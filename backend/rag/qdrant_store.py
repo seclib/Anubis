@@ -2,7 +2,7 @@ import logging
 from uuid import uuid5, NAMESPACE_URL
 
 from qdrant_client import QdrantClient
-from qdrant_client.models import Distance, PointStruct, VectorParams
+from qdrant_client.models import Distance, FieldCondition, Filter, MatchValue, PointStruct, VectorParams
 
 from backend.core.config import settings
 from backend.rag.chunker import Chunk
@@ -67,6 +67,22 @@ class QdrantStore:
             logger.info("upserted qdrant points=%s collection=%s", len(points), self.collection)
         except RuntimeError:
             logger.info("upserted fallback points=%s", len(fallback_points))
+
+    def delete_path(self, path: str) -> None:
+        deleted = [point_id for point_id, point in _FALLBACK_POINTS.items() if point["payload"].get("path") == path]
+        for point_id in deleted:
+            _FALLBACK_POINTS.pop(point_id, None)
+        try:
+            self.ensure_collection()
+            self.client.delete(
+                collection_name=self.collection,
+                points_selector=Filter(
+                    must=[FieldCondition(key="path", match=MatchValue(value=path))]
+                ),
+            )
+            logger.info("deleted qdrant path=%s fallback_points=%s", path, len(deleted))
+        except RuntimeError:
+            logger.info("deleted fallback path=%s points=%s", path, len(deleted))
 
     def search(self, query: str, limit: int) -> list[dict[str, object]]:
         vector = self.embedder.embed(query)

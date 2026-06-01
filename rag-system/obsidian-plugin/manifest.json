@@ -1,0 +1,10 @@
+{
+  "id": "anubis-sync",
+  "name": "Anubis Sync",
+  "version": "1.0.0",
+  "minAppVersion": "1.5.0",
+  "description": "Syncs an Obsidian vault to the Anubis RAG backend.",
+  "author": "Anubis",
+  "authorUrl": "",
+  "isDesktopOnly": false
+}

@@ -29,6 +29,8 @@ ok() { printf '%s[ OK ]%s %s\n' "$C_GREEN" "$C_RESET" "$*"; }
 warn() { printf '%s[WARN]%s %s\n' "$C_YELLOW" "$C_RESET" "$*"; }
 fail() { printf '%s[FAIL]%s %s\n' "$C_RED" "$C_RESET" "$*" >&2; }
 
+info "ROOT_DIR = $ROOT_DIR"
+
 usage() {
   cat <<EOF
 Usage: ./start.sh [options]
@@ -106,7 +108,8 @@ start_backend() {
   info "Logs backend: $BACKEND_LOG"
   (
     cd "$ROOT_DIR"
-    exec ./scripts/dev_backend.sh
+    # Use absolute path to ensure script runs even if working directory changes
+    exec "$ROOT_DIR/scripts/dev_backend.sh"
   ) >"$BACKEND_LOG" 2>&1 &
   BACKEND_PID="$!"
   STARTED_BACKEND="true"
@@ -121,10 +124,11 @@ start_backend() {
 
 start_desktop() {
   info "Lancement du desktop..."
-  (
-    cd "$ROOT_DIR"
-    exec ./scripts/launch_anubis_desktop.sh
-  )
+    (
+      cd "$ROOT_DIR"
+      # Run the desktop launcher in the foreground (no exec) so the backend stays alive
+      "$ROOT_DIR/scripts/launch_anubis_desktop.sh"
+    )
 }
 
 case "$MODE" in

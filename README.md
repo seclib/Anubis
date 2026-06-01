@@ -7,6 +7,7 @@ It runs on your Linux computer and gives you a desktop app where you can:
 - write and edit notes
 - ask an AI assistant questions
 - save useful knowledge into memory
+- run autonomous agent workflows
 - see system health at a glance
 - explore skills, agents, and memory through dashboard views
 

@@ -4,7 +4,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.routes import agent, brain, desktop, health, local, notes, rag, skills
+from backend.api.routes import agent, brain, desktop, health, local, notes, production, rag, skills
 from backend.core.config import settings
 from backend.core.logging import configure_logging
 
@@ -34,6 +34,7 @@ async def local_only(request: Request, call_next):  # noqa: ANN001
 
 
 app.include_router(health.router)
+app.include_router(production.router, tags=["production"])
 app.include_router(desktop.router, tags=["desktop"])
 app.include_router(local.router)
 app.include_router(notes.router, prefix="/notes", tags=["notes"])

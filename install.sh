@@ -276,7 +276,27 @@ create_python_environment() {
   if [[ -f "$ROOT_DIR/backend/requirements.txt" ]]; then
     run "$ROOT_DIR/.venv/bin/python" -m pip install -r "$ROOT_DIR/backend/requirements.txt"
   fi
+  install_nested_python_packages
   ok "Python environment is ready."
+}
+
+install_nested_python_packages() {
+  local packages=(
+    "$ROOT_DIR/anubis/kernel"
+    "$ROOT_DIR/anubis/packages/prompt-engine"
+    "$ROOT_DIR/anubis/packages/memory-sdk"
+    "$ROOT_DIR/anubis/services/tools"
+    "$ROOT_DIR/anubis/services/rag"
+    "$ROOT_DIR/anubis/services/ai-core"
+  )
+  local package
+
+  for package in "${packages[@]}"; do
+    if [[ -f "$package/pyproject.toml" ]]; then
+      run "$ROOT_DIR/.venv/bin/python" -m pip install -e "$package"
+    fi
+  done
+  ok "Nested Anubis Python packages are installed."
 }
 
 install_frontend_dependencies() {
@@ -287,6 +307,18 @@ install_frontend_dependencies() {
 
   if ! need_command npm; then
     fail "npm is required for the desktop app. Install Node.js/npm or rerun with --no-frontend."
+    exit 1
+  fi
+
+  if ! need_command node; then
+    fail "Node.js is required for the desktop app. Install Node.js 20+ or rerun with --no-frontend."
+    exit 1
+  fi
+
+  local node_major
+  node_major="$(node -p 'Number(process.versions.node.split(".")[0])' 2>/dev/null || printf '0')"
+  if ((node_major < 20)); then
+    fail "Node.js 20 or newer is required for Vite/Tauri. Found: $(node --version)"
     exit 1
   fi
 
@@ -439,6 +471,8 @@ PY
   if [[ "$INSTALL_FRONTEND" == "true" ]]; then
     [[ -d "$ROOT_DIR/desktop/node_modules" ]]
     ok "Desktop dependencies found."
+    run npm --prefix "$ROOT_DIR/desktop" run build
+    ok "Desktop frontend build verified."
   fi
 
   [[ -f "$ROOT_DIR/vault/notes/welcome.md" ]]
