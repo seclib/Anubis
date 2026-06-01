@@ -35,6 +35,7 @@ class QdrantRetrievalEngine:
         documents = [doc for doc in vector.load_vector_store().get("documents", []) if isinstance(doc, dict)]
         if limit is not None:
             documents = documents[: max(0, int(limit))]
+        target_vector_size = len(self.embeddings.embed_query("qdrant vector size probe")["embedding"])
         points: list[dict[str, Any]] = []
         for doc in documents:
             text = str(doc.get("text") or "")
@@ -42,7 +43,7 @@ class QdrantRetrievalEngine:
             if not text.strip():
                 continue
             embedding = doc.get("embedding")
-            if not isinstance(embedding, list):
+            if not isinstance(embedding, list) or len(embedding) != target_vector_size:
                 embedding = self.embeddings.embed_document(f"{source}\n{text}")["embedding"]
             payload = self._payload_from_doc(doc, text=text, source=source)
             points.append({"id": str(doc.get("id") or f"{source}:{len(points)}"), "vector": embedding, "payload": payload})
@@ -86,4 +87,3 @@ class QdrantRetrievalEngine:
 
 
 __all__ = ["QdrantRetrievalEngine"]
-
