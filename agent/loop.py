@@ -54,6 +54,7 @@ from agent.reviewer_agent import (
     normalize_review_report,
 )
 from agent.self_improvement import optimize_prompt_guidance, update_self_improvement_memory
+from agent.self_rewriting import create_self_rewriting_state
 from agent.streaming import short_text
 from agent.tester_agent import (
     build_tester_context,
@@ -562,6 +563,7 @@ def _initial_memory(
             "strategy_improvements": [],
             "prompt_guidance": "",
         },
+        "self_rewriting": create_self_rewriting_state(),
         "self_healing": {
             "max_tool_retries": MAX_SELF_HEALING_RETRIES,
             "persistent_failures": 0,

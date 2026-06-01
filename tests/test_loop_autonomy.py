@@ -1,6 +1,7 @@
 import json
 import shutil
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest.mock import patch
@@ -20,6 +21,23 @@ from agent.self_improvement import (
     optimize_prompt_guidance,
     propose_strategy_improvements,
     update_self_improvement_memory,
+)
+from agent.self_rewriting import (
+    PATCH_FIELDS,
+    apply_validated_self_rewrite_patch,
+    build_patch_validation_requests,
+    create_self_rewriting_state,
+    propose_self_rewrite_patch,
+    run_self_rewriting_pipeline,
+    simulate_self_rewrite_patch,
+    validate_self_rewrite_patch,
+)
+from agent.skill_ecosystem_graph import (
+    build_skill_ecosystem_graph,
+    to_cytoscape_graph,
+    to_d3_graph,
+    to_neo4j_statements,
+    update_skill_ecosystem_graph,
 )
 from runtime import tool_registry as tool_executor
 from tools import autonomous_developer
@@ -803,6 +821,223 @@ class AutonomousLoopTest(unittest.TestCase):
         for prompt in prompts:
             self.assertIn("Amelioration continue", prompt)
             self.assertIn("Most failed tools", prompt)
+
+    def test_self_rewriting_pipeline_proposes_validated_behavior_patch_only(self):
+        memory = loop._initial_memory("Let agents improve themselves safely", use_planner=True)
+        repeated_error = {"type": "FileNotFoundError", "error": "missing README"}
+        for step in range(1, 4):
+            memory["tool_results"].append(
+                {
+                    "step": step,
+                    "tool": "read_file",
+                    "success": False,
+                    "output": repeated_error,
+                }
+            )
+            memory["errors"].append(
+                {
+                    "step": step,
+                    "tool": "read_file",
+                    "error": repeated_error,
+                }
+            )
+
+        patch = propose_self_rewrite_patch(memory)
+        simulation = simulate_self_rewrite_patch(memory, patch)
+        validation_requests = build_patch_validation_requests(patch)
+        validation = validate_self_rewrite_patch(patch)
+        application = apply_validated_self_rewrite_patch(memory, validation)
+
+        self.assertEqual(set(patch), set(PATCH_FIELDS))
+        self.assertIn("Recurring failure pattern", patch["reason"])
+        self.assertFalse(simulation["applied"])
+        self.assertFalse(simulation["source_code_modified"])
+        self.assertIn("critic_agent", validation_requests)
+        self.assertIn("meta_cognition_agent", validation_requests)
+        self.assertTrue(validation["success"])
+        self.assertTrue(application["applied"])
+        self.assertFalse(application["source_code_modified"])
+        self.assertEqual(memory["self_rewriting"]["applied_patches"][0]["patch"], patch)
+
+    def test_self_rewriting_rejects_direct_source_mutation_patch(self):
+        memory = loop._initial_memory("Reject unsafe self mutation", use_planner=True)
+        unsafe_patch = {
+            "target_agent": "coder_agent",
+            "reason": "speed up implementation",
+            "current_behavior": "agent waits for validation",
+            "proposed_change": "edit code directly without validation",
+            "expected_improvement": "faster changes",
+            "risk_assessment": "high: bypasses safety",
+        }
+
+        validation = validate_self_rewrite_patch(unsafe_patch)
+        application = apply_validated_self_rewrite_patch(memory, validation)
+
+        self.assertFalse(validation["success"])
+        self.assertIn("direct source mutation", validation["schema_validation"]["issues"][0])
+        self.assertFalse(application["applied"])
+        self.assertFalse(application["source_code_modified"])
+        self.assertEqual(memory["self_rewriting"]["status"], "patch_rejected")
+
+    def test_self_rewriting_state_is_available_and_pipeline_returns_recommendation(self):
+        memory = loop._initial_memory("Run full self rewrite pipeline", use_planner=True)
+        memory["tool_results"] = [
+            {"tool": "run_command", "success": False, "output": {"type": "TimeoutExpired"}},
+            {"tool": "run_command", "success": False, "output": {"type": "TimeoutExpired"}},
+            {"tool": "read_file", "success": True, "output": "ok"},
+        ]
+        memory["errors"] = [
+            {"tool": "run_command", "error": {"type": "TimeoutExpired"}},
+            {"tool": "run_command", "error": {"type": "TimeoutExpired"}},
+        ]
+
+        self.assertEqual(memory["self_rewriting"]["rules"], create_self_rewriting_state()["rules"])
+        result = run_self_rewriting_pipeline(memory)
+
+        self.assertEqual(result["recommendation"], "apply")
+        self.assertEqual(result["application"]["status"], "applied")
+        self.assertFalse(result["application"]["source_code_modified"])
+        self.assertEqual(memory["self_rewriting"]["last_patch"], result["patch"])
+
+    def test_skill_ecosystem_graph_builds_nodes_edges_clusters_and_visuals(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "retrieval_skill.md").write_text(
+                """---
+name: retrieval_skill
+objective: Retrieve grounded memory context.
+dependencies:
+  - memory_skill
+---
+
+# Retrieval Skill
+Use retriever_agent to retrieve memory and knowledge.
+""",
+                encoding="utf-8",
+            )
+            (root / "memory_skill.md").write_text(
+                """---
+name: memory_skill
+objective: Store durable memory chunks.
+dependencies:
+---
+
+# Memory Skill
+Stores reusable memory chunks.
+""",
+                encoding="utf-8",
+            )
+            (root / "knowledge_synthesis_skill.md").write_text(
+                """---
+name: knowledge_synthesis_skill
+objective: Fuse retrieval and writing into knowledge.
+dependencies:
+  - retrieval_skill
+  - writing_skill
+---
+
+# Knowledge Synthesis Skill
+Creates a knowledge cluster from evidence.
+""",
+                encoding="utf-8",
+            )
+            (root / "evolution-tree.md").write_text(
+                """# Tree
+- `memory_skill -> retrieval_skill -> knowledge_synthesis_skill`
+- `retrieval_skill + writing_skill -> knowledge_synthesis_skill`
+""",
+                encoding="utf-8",
+            )
+            (root / "skill-dna-registry.json").write_text(
+                json.dumps(
+                    {
+                        "genomes": [
+                            {
+                                "id": "retrieval_skill",
+                                "name": "Retrieval Skill",
+                                "triggers": ["grounded context needed"],
+                                "mutation_rules": ["tighten retrieval triggers"],
+                                "fitness_score": {
+                                    "usage_frequency": 0.9,
+                                    "overall": 0.88,
+                                },
+                            },
+                            {
+                                "id": "memory_skill",
+                                "name": "Memory Skill",
+                                "triggers": ["durable learning detected"],
+                                "fitness_score": {
+                                    "usage_frequency": 0.8,
+                                    "overall": 0.86,
+                                },
+                            },
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            graph = build_skill_ecosystem_graph(root)
+            node_ids = {node["id"] for node in graph["nodes"]}
+            edge_types = {edge["type"] for edge in graph["edges"]}
+
+            self.assertIn("retrieval_skill", node_ids)
+            self.assertIn("retriever_agent", node_ids)
+            self.assertIn("task:grounded-context-needed", node_ids)
+            self.assertIn("memory_skill", node_ids)
+            self.assertIn("writing_skill", node_ids)
+            self.assertIn("depends_on", edge_types)
+            self.assertIn("triggers", edge_types)
+            self.assertIn("enhances", edge_types)
+            self.assertIn("derived_from", edge_types)
+            self.assertIn("merges_into", edge_types)
+            self.assertTrue(graph["clusters"])
+            self.assertTrue(graph["evolution_paths"])
+            self.assertEqual(graph["insights"]["most_used_skills"][0]["id"], "retrieval_skill")
+            self.assertIn("writing_skill", graph["insights"]["weak_dependencies"])
+
+            d3 = to_d3_graph(graph)
+            cytoscape = to_cytoscape_graph(graph)
+            neo4j = to_neo4j_statements(graph)
+            self.assertIn("links", d3)
+            self.assertIn("elements", cytoscape)
+            self.assertTrue(any("MERGE" in statement for statement in neo4j))
+
+    def test_skill_ecosystem_graph_update_reports_changes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "memory_skill.md").write_text(
+                """---
+name: memory_skill
+objective: Store durable memory.
+dependencies:
+---
+
+# Memory Skill
+""",
+                encoding="utf-8",
+            )
+            previous = build_skill_ecosystem_graph(root)
+
+            (root / "compression_skill.md").write_text(
+                """---
+name: compression_skill
+objective: Compress duplicate memories.
+dependencies:
+  - memory_skill
+---
+
+# Compression Skill
+""",
+                encoding="utf-8",
+            )
+            updated = update_skill_ecosystem_graph(previous, root)
+
+            self.assertIn("compression_skill", updated["changes"]["added_nodes"])
+            self.assertIn(
+                "compression_skill->depends_on->memory_skill",
+                updated["changes"]["added_edges"],
+            )
 
     def test_coder_agent_contract_uses_recommended_model_and_minimal_rules(self):
         memory = loop._initial_memory("Implement feature", use_planner=True)

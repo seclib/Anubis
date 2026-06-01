@@ -1,0 +1,133 @@
+{
+  "version": 1,
+  "schema": "SKILL_DNA",
+  "updated_at": "2026-06-01",
+  "genomes": [
+    {
+      "id": "loop-cognition-core",
+      "name": "Loop Cognition Core",
+      "purpose": "Turn each meaningful interaction into MEMORY -> ACTION -> NEW MEMORY.",
+      "triggers": ["new user interaction", "durable learning opportunity", "memory-backed reasoning needed"],
+      "inputs": ["user task", "Hermes memory", "Markdown notes", "vector/Qdrant context"],
+      "steps": ["retrieve memory", "build concise context", "decide action", "execute", "extract learning", "store and index memory"],
+      "outputs": ["memory used", "action performed", "new memory", "cycle justification"],
+      "dependencies": ["memory_skill", "retrieval_skill"],
+      "mutation_rules": ["tighten retrieval triggers", "reduce memory noise", "add verification when storage changes"],
+      "fitness_score": {"utility": 0.95, "usage_frequency": 0.95, "precision": 0.9, "cost": 0.35, "overall": 0.91}
+    },
+    {
+      "id": "skill-evolution-engine",
+      "name": "Skill Evolution Engine",
+      "purpose": "Detect repeated patterns and turn them into reusable skills.",
+      "triggers": ["repeated agent action", "new reusable workflow", "skill creation request", "skill fusion request"],
+      "inputs": ["memory context", "existing skills", "observed pattern", "evolution tree"],
+      "steps": ["detect pattern", "qualify usefulness", "create or update skill", "fuse compatible skills", "update tree", "store and index"],
+      "outputs": ["created skills", "fused skills", "updated evolution tree"],
+      "dependencies": ["loop-cognition-core", "skill-dna-engine", "memory_skill"],
+      "mutation_rules": ["encode skill DNA before fusion", "add fitness evaluation after skill use", "merge weak overlapping skills"],
+      "fitness_score": {"utility": 0.92, "usage_frequency": 0.8, "precision": 0.86, "cost": 0.42, "overall": 0.86}
+    },
+    {
+      "id": "skill-dna-engine",
+      "name": "Skill DNA Engine",
+      "purpose": "Represent skills as evolvable genomes with mutation, crossover, and fitness.",
+      "triggers": ["skill needs evaluation", "skill mutation request", "skill crossover request", "weak skill cleanup"],
+      "inputs": ["skill Markdown", "usage memory", "validation results", "user feedback"],
+      "steps": ["encode genome", "evaluate fitness", "mutate weak fields", "crossover compatible genomes", "select replicate/merge/retire", "store registry"],
+      "outputs": ["SKILL_DNA", "mutations", "hybrid skills", "fitness decisions"],
+      "dependencies": ["skill-evolution-engine", "living-cognitive-skill-system", "memory_skill", "retrieval_skill"],
+      "mutation_rules": ["adjust scoring weights from feedback", "split overloaded genomes", "add usage telemetry when available"],
+      "fitness_score": {"utility": 0.88, "usage_frequency": 0.5, "precision": 0.82, "cost": 0.45, "overall": 0.78}
+    },
+    {
+      "id": "living-cognitive-skill-system",
+      "name": "Living Cognitive Skill System",
+      "purpose": "Make cognition, skill evolution, memory, and retrieval reinforce each other continuously.",
+      "triggers": ["system self-improvement", "new useful action detected", "capability graph update"],
+      "inputs": ["user input", "meta-cognition observations", "loop optimizer constraints", "skill DNA", "agent outputs", "memory result", "retrieval index result"],
+      "steps": ["capture user intent", "run meta-cognition", "stabilize with loop optimizer", "select skills with auto-executor", "evaluate with skill DNA", "route agents", "update memory/RAG", "restart with improved capability"],
+      "outputs": ["active pipeline stage", "selected skills or agents", "stabilization decision", "DNA feedback target", "memory/indexing result", "next-cycle improvement"],
+      "dependencies": ["loop-cognition-core", "meta-cognition-agent", "infinite-loop-optimizer", "skill-auto-executor", "skill-dna-engine", "memory_skill", "retrieval_skill"],
+      "mutation_rules": ["prefer strong skills in next cycle", "replicate high-fitness skills", "compress low-value memories"],
+      "fitness_score": {"utility": 0.96, "usage_frequency": 0.75, "precision": 0.88, "cost": 0.5, "overall": 0.86}
+    },
+    {
+      "id": "knowledge_synthesis_skill",
+      "name": "Knowledge Synthesis Skill",
+      "purpose": "Fuse retrieval and writing into durable structured knowledge.",
+      "triggers": ["retrieved evidence should become a note", "documentation from evidence", "memory artifact creation"],
+      "inputs": ["retrieved evidence", "task purpose", "target artifact type"],
+      "steps": ["retrieve evidence", "reason over context", "write structured artifact", "separate facts/inferences", "store and index"],
+      "outputs": ["evidence summary", "structured artifact", "storage/indexing result"],
+      "dependencies": ["retrieval_skill", "writing_skill", "contextual_reasoning_skill"],
+      "mutation_rules": ["improve citation discipline", "reduce evidence noise", "add stronger fact/inference separation"],
+      "fitness_score": {"utility": 0.9, "usage_frequency": 0.7, "precision": 0.85, "cost": 0.48, "overall": 0.82}
+    },
+    {
+      "id": "adaptive-skill-replication",
+      "name": "Adaptive Skill Replication",
+      "purpose": "Replicate, merge, mutate, or retire skills based on DNA fitness.",
+      "triggers": ["fitness evaluation completed", "weak skill detected", "strong skill detected", "skill cleanup requested"],
+      "inputs": ["DNA registry", "fitness scores", "usage history", "evolution tree"],
+      "steps": ["find strong genomes", "replicate or specialize strong skills", "find weak genomes", "mutate once", "merge or retire persistent weak skills", "update registry and tree"],
+      "outputs": ["replication decisions", "mutation decisions", "merge/retirement decisions", "updated registry"],
+      "dependencies": ["skill-dna-engine", "compression_skill", "memory_skill"],
+      "mutation_rules": ["raise retirement threshold slowly", "never retire user-declared core skills without explicit confirmation", "prefer merge over deletion"],
+      "fitness_score": {"utility": 0.82, "usage_frequency": 0.45, "precision": 0.78, "cost": 0.4, "overall": 0.73}
+    },
+    {
+      "id": "infinite-loop-optimizer",
+      "name": "Infinite Loop Optimizer",
+      "purpose": "Stabilize Memory -> Action -> Memory loops and reduce cumulative cognitive errors.",
+      "triggers": ["repeated action sequence", "weak retrieval confidence", "duplicate memory write", "RAG conflict", "invalid agent output", "no-progress cycle"],
+      "inputs": ["loop state", "recent actions", "verification status", "retrieval confidence", "memory writes", "tool failures"],
+      "steps": ["diagnose loop", "detect hallucination/duplication/recursion/RAG errors", "reroute to retrieval or compression", "reset invalid state", "verify stable output", "update optimized flow"],
+      "outputs": ["loop diagnostic", "corrections applied", "optimized flow version", "residual risks"],
+      "dependencies": ["loop-cognition-core", "retrieval_skill", "memory_skill", "compression_skill", "skill-dna-engine"],
+      "mutation_rules": ["tighten repeated-action detection", "lower memory-write threshold when duplicates increase", "reroute earlier when retrieval confidence is weak", "increase verification before final output under high uncertainty"],
+      "fitness_score": {"utility": 0.9, "usage_frequency": 0.65, "precision": 0.84, "cost": 0.38, "overall": 0.84}
+    },
+    {
+      "id": "meta-cognition-agent",
+      "name": "Meta-Cognition Agent",
+      "purpose": "Observe Anubis agents and produce structural insights without directly executing their workflows.",
+      "triggers": ["system cognition report requested", "agent inefficiency suspected", "workflow restructuring needed", "memory flow audit", "skill DNA mutation review"],
+      "inputs": ["agent traces", "memory summaries", "skill DNA registry", "evolution tree", "retrieval/indexing health", "loop diagnostics"],
+      "steps": ["observe decisions", "detect patterns", "analyze inefficiencies and repeated errors", "review agent redundancy", "reflect on architecture", "propose restructuring and DNA mutations"],
+      "outputs": ["system cognition report", "problems detected", "improvements proposed", "restructuring suggestions"],
+      "dependencies": ["retrieval_skill", "writing_skill", "skill-evolution-engine", "infinite-loop-optimizer", "skill-dna-engine"],
+      "mutation_rules": ["add telemetry requirements when observations lack evidence", "merge redundant agent responsibilities", "route repeated instability findings into loop optimizer", "route skill quality findings into DNA fitness updates"],
+      "fitness_score": {"utility": 0.88, "usage_frequency": 0.55, "precision": 0.82, "cost": 0.32, "overall": 0.8}
+    },
+    {
+      "id": "skill-auto-executor",
+      "name": "Skill Auto-Executor",
+      "purpose": "Automatically select, validate, chain, and execute relevant Anubis skills with feedback to Skill DNA.",
+      "triggers": ["user task maps to known skill", "implicit skill chain needed", "automatic skill activation requested", "skill execution feedback needed"],
+      "inputs": ["user context", "retrieved memory", "skill DNA registry", "evolution tree", "available skill Markdown", "dependency status"],
+      "steps": ["detect applicable skills", "validate skill existence and DNA status", "check dependencies", "select minimal chain", "prepare inputs", "execute skill procedures", "verify outputs", "send feedback to skill DNA"],
+      "outputs": ["skill executed", "result produced", "feedback for Skill DNA Engine", "validation notes"],
+      "dependencies": ["retrieval_skill", "skill-dna-engine", "infinite-loop-optimizer", "meta-cognition-agent"],
+      "mutation_rules": ["raise activation threshold after false positives", "lower chain depth when cost rises", "add telemetry when validation is ambiguous", "prefer high-fitness direct skills over long chains"],
+      "fitness_score": {"utility": 0.89, "usage_frequency": 0.5, "precision": 0.8, "cost": 0.46, "overall": 0.78}
+    },
+    {
+      "id": "anubis-system-assembly-pipeline",
+      "name": "Anubis System Assembly Pipeline",
+      "purpose": "Define the canonical end-to-end flow from user input through cognition, stabilization, skill execution, DNA evolution, agents, memory update, and loop restart.",
+      "triggers": ["system assembly explanation", "architecture alignment", "pipeline update", "agent orchestration design"],
+      "inputs": ["user input", "memory context", "system observations", "loop diagnostics", "skill DNA registry", "agent outputs"],
+      "steps": ["meta-cognition analysis", "loop optimization", "skill auto-execution", "skill DNA evaluation", "agent routing", "memory/RAG update", "loop restart"],
+      "outputs": ["active pipeline stage", "selected skills or agents", "stabilization decision", "DNA feedback target", "memory/RAG update result", "next-loop improvement"],
+      "dependencies": ["meta-cognition-agent", "infinite-loop-optimizer", "skill-auto-executor", "skill-dna-engine", "retrieval_skill", "writing_skill", "memory_skill"],
+      "mutation_rules": ["reorder stages only when feedback shows lower cost or higher precision", "keep meta-cognition observational", "keep memory update after agent output verification", "route weak evidence back to loop optimizer"],
+      "fitness_score": {"utility": 0.94, "usage_frequency": 0.7, "precision": 0.88, "cost": 0.4, "overall": 0.87}
+    }
+  ],
+  "selection_policy": {
+    "replicate_if_overall_gte": 0.86,
+    "mutate_if_overall_between": [0.55, 0.85],
+    "merge_or_retire_if_overall_lt": 0.55,
+    "protected_core_skills": ["loop-cognition-core", "living-cognitive-skill-system", "skill-evolution-engine"]
+  }
+}

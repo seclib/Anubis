@@ -2,7 +2,7 @@
   "version": 1,
   "identity": "Hermes",
   "created_at": "2026-05-28T08:58:11.590472+00:00",
-  "updated_at": "2026-06-01T06:01:18.901284+00:00",
+  "updated_at": "2026-06-01T06:16:34.894391+00:00",
   "entries": [
     {
       "id": "hermes-20260528-085811-590480",
@@ -674,6 +674,173 @@
         "fusion",
         "evolution-tree",
         "agent-policy",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260601-060426-594533",
+      "created_at": "2026-06-01T06:04:26.594552+00:00",
+      "updated_at": "2026-06-01T06:04:26.594555+00:00",
+      "summary": "Anubis skill tree expanded with retrieval, writing, memory, and knowledge synthesis branches.",
+      "task": "Materialize Skill Root taxonomy",
+      "result": "Created actionable Markdown skills for retrieval_skill, advanced_rag_skill, contextual_reasoning_skill, writing_skill, structured_note_skill, documentation_skill, memory_skill, compression_skill, summarization_skill, and knowledge_synthesis_skill. Updated evolution-tree.md with evolution and fusion edges.",
+      "lessons": [
+        "Retrieval evolves into advanced RAG and contextual reasoning.",
+        "Writing evolves into structured notes and documentation.",
+        "Memory evolves into compression and summarization.",
+        "retrieval_skill plus writing_skill fuses into knowledge_synthesis_skill."
+      ],
+      "tags": [
+        "skills",
+        "skill-root",
+        "retrieval",
+        "writing",
+        "memory",
+        "fusion",
+        "knowledge-synthesis",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260601-060602-190811",
+      "created_at": "2026-06-01T06:06:02.190828+00:00",
+      "updated_at": "2026-06-01T06:06:02.190830+00:00",
+      "summary": "Anubis combines Loop Cognition and Skill Evolution into a living self-improving system.",
+      "task": "Encode living cognitive skill system",
+      "result": "Updated cognitive-skill-evolution-loop.md, added living-cognitive-skill-system.md, and linked the meta-skill in evolution-tree.md. The loop is: cognition retrieves memory and acts, useful action is detected, Skill Engine observes the pattern, creates or improves a skill, stores it in memory, indexes it, then the next cognition loop starts with better capability.",
+      "lessons": [
+        "Useful actions should be evaluated as candidate reusable capabilities.",
+        "Skill Engine should observe patterns after action, not only from explicit requests.",
+        "Created or improved skills must be stored as Markdown memory and indexed for the next Loop Cognition cycle.",
+        "The next cycle should prefer retrieved skills over ad hoc behavior."
+      ],
+      "tags": [
+        "living-system",
+        "loop-cognition",
+        "skill-evolution",
+        "self-improvement",
+        "memory",
+        "skills",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260601-060826-069084",
+      "created_at": "2026-06-01T06:08:26.069098+00:00",
+      "updated_at": "2026-06-01T06:08:26.069101+00:00",
+      "summary": "Anubis now encodes skills as evolvable Skill DNA genomes.",
+      "task": "Create Skill DNA Engine",
+      "result": "Created skill-dna-engine.md, adaptive-skill-replication.md, and skill-dna-registry.json. Mutated skill-evolution-engine.md so skill creation and fusion now include DNA encoding, mutation, and fitness evaluation. Updated evolution-tree.md with DNA and adaptive replication layers.",
+      "lessons": [
+        "Each skill can be represented as SKILL_DNA with id, purpose, triggers, inputs, steps, outputs, dependencies, mutation rules, and fitness score.",
+        "Skill mutation should change triggers, steps, dependencies, or outputs to improve performance.",
+        "Crossover fuses compatible skill genomes into hybrids.",
+        "Fitness combines utility, usage frequency, precision, and cost; strong skills replicate, weak skills mutate, merge, or retire."
+      ],
+      "tags": [
+        "skill-dna",
+        "genome",
+        "mutation",
+        "crossover",
+        "fitness",
+        "adaptive-replication",
+        "skills",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260601-061029-997393",
+      "created_at": "2026-06-01T06:10:29.997406+00:00",
+      "updated_at": "2026-06-01T06:10:29.997408+00:00",
+      "summary": "Anubis now has an Infinite Loop Optimizer to stabilize Memory -> Action -> Memory cycles.",
+      "task": "Create Infinite Loop Optimizer",
+      "result": "Created infinite-loop-optimizer.md, added it to loop-cognition-core.md and living-cognitive-skill-system.md, updated evolution-tree.md, and added an infinite-loop-optimizer genome to skill-dna-registry.json. The optimized flow diagnoses hallucination risk, repeated actions, duplicate memory, RAG incoherence, invalid outputs, then reroutes to retrieval, compression, verification, or stable state reset.",
+      "lessons": [
+        "Loop stabilization should never block the system; it should produce a stable output or safest next action.",
+        "Weak retrieval confidence should reroute to retrieval before action or final answer.",
+        "Duplicate memory should route to compression instead of repeated storage.",
+        "No-progress cycles should switch strategy and avoid repeated identical actions.",
+        "High uncertainty requires verification before final output or durable memory writes."
+      ],
+      "tags": [
+        "infinite-loop-optimizer",
+        "loop-stability",
+        "memory-action-memory",
+        "rag",
+        "deduplication",
+        "verification",
+        "self-improvement",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260601-061239-664698",
+      "created_at": "2026-06-01T06:12:39.664712+00:00",
+      "updated_at": "2026-06-01T06:12:39.664715+00:00",
+      "summary": "Anubis now has a Meta-Cognition Agent for reflective observation of agent behavior.",
+      "task": "Create Meta-Cognition Agent",
+      "result": "Created meta-cognition-agent.md and system-cognition-report-2026-06-01.md. Updated evolution-tree.md and skill-dna-registry.json. The agent observes retriever_agent, writer_agent, indexer_agent, skill_engine, and loop_optimizer without executing their workflows, then produces structural insights, problems, and restructuring suggestions.",
+      "lessons": [
+        "Meta-cognition should observe decisions, patterns, inefficiencies, redundancy, and memory flow without directly executing agent workflows.",
+        "Indexer behavior should become a first-class observable skill because index health affects retrieval quality.",
+        "Loop optimizer diagnostics should feed Skill DNA fitness updates.",
+        "Writer, memory, and compression responsibilities must stay separated to avoid duplicate notes."
+      ],
+      "tags": [
+        "meta-cognition",
+        "agent-observation",
+        "system-report",
+        "architecture",
+        "memory-flow",
+        "skill-dna",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260601-061432-583687",
+      "created_at": "2026-06-01T06:14:32.583703+00:00",
+      "updated_at": "2026-06-01T06:14:32.583706+00:00",
+      "summary": "Anubis now has a Skill Auto-Executor for validated automatic skill activation.",
+      "task": "Create Skill Auto-Executor",
+      "result": "Created skill-auto-executor.md and skill-auto-execution-log-2026-06-01.md. Updated evolution-tree.md and skill-dna-registry.json. The executor detects applicable skills from context and RAG, validates skill existence, DNA status, dependencies, and fitness, executes the smallest reliable chain, verifies outputs, and sends feedback to Skill DNA.",
+      "lessons": [
+        "Automatic skill activation must validate skills against Markdown artifacts, DNA registry, dependencies, and fitness before execution.",
+        "Skill chains should be minimal and prefer high-fitness direct skills over broad execution graphs.",
+        "Execution feedback should update Skill DNA with utility, precision, cost, dependency gaps, and success or failure notes.",
+        "Meta-cognition skills should remain observation-only unless a report is explicitly the selected output."
+      ],
+      "tags": [
+        "skill-auto-executor",
+        "automatic-activation",
+        "skill-dna",
+        "dependency-validation",
+        "feedback-loop",
+        "skills",
+        "high"
+      ]
+    },
+    {
+      "id": "hermes-20260601-061634-894368",
+      "created_at": "2026-06-01T06:16:34.894381+00:00",
+      "updated_at": "2026-06-01T06:16:34.894384+00:00",
+      "summary": "Anubis canonical assembly pipeline is now Meta-Cognition -> Loop Optimizer -> Skill Auto-Executor -> Skill DNA -> Agents -> Memory/RAG -> Loop restart.",
+      "task": "Encode full Anubis system assembly pipeline",
+      "result": "Created anubis-system-assembly-pipeline.md and updated living-cognitive-skill-system.md, skill-auto-executor.md, evolution-tree.md, and skill-dna-registry.json to reflect the canonical order from user input through meta-cognition, flow stabilization, skill activation, DNA evolution, agent routing, memory/RAG update, and loop restart.",
+      "lessons": [
+        "Meta-Cognition should inspect system state before stabilization and execution.",
+        "Loop Optimizer should stabilize weak RAG, recursion, duplicate memory, and invalid outputs before automatic skill execution.",
+        "Skill Auto-Executor should select validated skills before concrete agent routing.",
+        "Skill DNA Engine should evaluate fitness and feedback targets before and after execution.",
+        "Memory/RAG update closes the loop and improves the next cycle."
+      ],
+      "tags": [
+        "system-assembly",
+        "canonical-pipeline",
+        "meta-cognition",
+        "loop-optimizer",
+        "skill-auto-executor",
+        "skill-dna",
+        "rag",
         "high"
       ]
     }
