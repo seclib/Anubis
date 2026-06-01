@@ -1,6 +1,11 @@
+import logging
+
 from backend.rag.chunker import chunk_note
 from backend.rag.qdrant_store import QdrantStore
 from backend.vault.service import VaultService
+
+
+logger = logging.getLogger("anubis.rag.indexer")
 
 
 class RagIndexer:
@@ -14,4 +19,5 @@ class RagIndexer:
             content = self.vault.read_note(note["path"])
             chunks.extend(chunk_note(note["path"], content))
         self.store.upsert_chunks(chunks)
+        logger.info("reindexed vault chunks=%s", len(chunks))
         return len(chunks)

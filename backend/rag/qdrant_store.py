@@ -1,3 +1,4 @@
+import logging
 from uuid import uuid5, NAMESPACE_URL
 
 from qdrant_client import QdrantClient
@@ -6,6 +7,9 @@ from qdrant_client.models import Distance, PointStruct, VectorParams
 from backend.core.config import settings
 from backend.rag.chunker import Chunk
 from backend.rag.embedder import LocalEmbedder
+
+
+logger = logging.getLogger("anubis.rag.qdrant")
 
 
 class QdrantStore:
@@ -17,6 +21,7 @@ class QdrantStore:
     def ensure_collection(self) -> None:
         if self.client.collection_exists(self.collection):
             return
+        logger.info("creating qdrant collection=%s dimensions=%s", self.collection, self.embedder.dimensions)
         self.client.create_collection(
             collection_name=self.collection,
             vectors_config=VectorParams(size=self.embedder.dimensions, distance=Distance.COSINE),
@@ -34,6 +39,7 @@ class QdrantStore:
         ]
         if points:
             self.client.upsert(collection_name=self.collection, points=points)
+        logger.info("upserted qdrant points=%s collection=%s", len(points), self.collection)
 
     def search(self, query: str, limit: int) -> list[dict[str, object]]:
         self.ensure_collection()
@@ -43,4 +49,6 @@ class QdrantStore:
             limit=limit,
             with_payload=True,
         )
-        return [{"score": result.score, **dict(result.payload or {})} for result in response.points]
+        results = [{"score": result.score, **dict(result.payload or {})} for result in response.points]
+        logger.info("qdrant query collection=%s limit=%s results=%s", self.collection, limit, len(results))
+        return results

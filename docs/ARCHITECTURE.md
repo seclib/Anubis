@@ -1,5 +1,9 @@
 # Anubis Agent Architecture
 
+For the production Desktop OS folder boundaries and entrypoints, see
+`docs/SYSTEM_ARCHITECTURE.md`. This file documents the lower-level autonomous
+agent dependency rules.
+
 ## Dependency Direction
 
 ```text

@@ -1,0 +1,28 @@
+{
+  "services": [
+    {
+      "name": "rag",
+      "label": "RAG / Qdrant",
+      "command": "docker compose up --no-color qdrant redis",
+      "health": "127.0.0.1:6333"
+    },
+    {
+      "name": "backend",
+      "label": "Backend API",
+      "command": ".venv/bin/python -m uvicorn backend.main:app --host 127.0.0.1 --port 8000",
+      "health": "127.0.0.1:8000"
+    },
+    {
+      "name": "agent",
+      "label": "Agent Orchestrator",
+      "command": "python -c 'from agent.multi_agent import AGENT_SPECS; print(len(AGENT_SPECS))'",
+      "health": "process"
+    },
+    {
+      "name": "watchdog",
+      "label": "Self-Healing Watchdog",
+      "command": "embedded in Tauri launcher",
+      "health": "anubis-watchdog events"
+    }
+  ]
+}

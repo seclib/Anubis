@@ -11,17 +11,28 @@ type ServiceStatus = {
   status: "running" | "stopped" | string;
   detail: string;
   pid?: number | null;
+  restart_count?: number;
+  last_failure?: string | null;
+  heartbeat_age_ms?: number | null;
 };
 
 type LauncherStatus = {
   services: ServiceStatus[];
   running: boolean;
+  healthy: boolean;
 };
 
 type LogLine = {
   service: string;
   stream: string;
   line: string;
+};
+
+type WatchdogEvent = {
+  service: string;
+  severity: "info" | "warning" | "error" | string;
+  message: string;
+  restart_count: number;
 };
 
 const emptyLauncher: LauncherStatus = {
@@ -32,7 +43,8 @@ const emptyLauncher: LauncherStatus = {
     { name: "memory", label: "Memory System", status: "stopped", detail: "Waiting for status" },
     { name: "frontend", label: "Desktop Frontend", status: "running", detail: "Tauri dashboard loaded" }
   ],
-  running: false
+  running: false,
+  healthy: false
 };
 
 async function launcherInvoke<T>(command: string): Promise<T> {
@@ -44,6 +56,7 @@ function App() {
   const [logs, setLogs] = useState<LogLine[]>([]);
   const [launcherBusy, setLauncherBusy] = useState(false);
   const [launcherError, setLauncherError] = useState("");
+  const [watchdogAlert, setWatchdogAlert] = useState<WatchdogEvent | null>(null);
   const [notes, setNotes] = useState<NoteSummary[]>([]);
   const [activePath, setActivePath] = useState("");
   const [content, setContent] = useState("");
@@ -55,6 +68,7 @@ function App() {
   const [selectedText, setSelectedText] = useState("");
   const logEndRef = useRef<HTMLDivElement | null>(null);
   const dirty = content !== savedContent;
+  const runningCount = launcher.services.filter((service) => service.status === "running").length;
 
   const servicesByName = useMemo(
     () => Object.fromEntries(launcher.services.map((service) => [service.name, service])),
@@ -68,14 +82,22 @@ function App() {
       .catch(() => setLogs([]));
     const timer = window.setInterval(refreshLauncher, 2500);
     let unlisten: (() => void) | undefined;
+    let unlistenWatchdog: (() => void) | undefined;
     listen<LogLine>("anubis-log", (event) => {
       setLogs((current) => [...current.slice(-799), event.payload]);
     }).then((dispose) => {
       unlisten = dispose;
     });
+    listen<WatchdogEvent>("anubis-watchdog", (event) => {
+      setWatchdogAlert(event.payload);
+      refreshLauncher();
+    }).then((dispose) => {
+      unlistenWatchdog = dispose;
+    });
     return () => {
       window.clearInterval(timer);
       unlisten?.();
+      unlistenWatchdog?.();
     };
   }, []);
 
@@ -161,7 +183,15 @@ function App() {
         <header className="launcher-header">
           <div>
             <h1>Anubis Desktop OS</h1>
-            <span>Local launcher for backend, RAG, agent swarm, memory, and desktop UI</span>
+            <span>
+              {launcher.healthy
+                ? "System healthy"
+                : launcher.running
+                  ? "Services starting or partially available"
+                  : "System stopped"}
+              {" · "}
+              {runningCount}/{launcher.services.length} services running
+            </span>
           </div>
           <div className="launcher-actions">
             <button disabled={launcherBusy} onClick={() => runLauncherCommand("start_anubis")}>
@@ -178,7 +208,7 @@ function App() {
 
         <div className="status-grid">
           {launcher.services.map((service) => (
-            <article className="status-tile" key={service.name}>
+            <article className={`status-tile ${service.status === "running" ? "is-running" : ""}`} key={service.name}>
               <div>
                 <strong>{service.label}</strong>
                 <span className={service.status === "running" ? "status-dot running" : "status-dot"} />
@@ -187,12 +217,21 @@ function App() {
               <small>
                 {service.detail}
                 {service.pid ? ` · pid ${service.pid}` : ""}
+                {service.restart_count ? ` · restarts ${service.restart_count}` : ""}
+                {service.heartbeat_age_ms ? ` · heartbeat ${Math.round(service.heartbeat_age_ms / 1000)}s` : ""}
               </small>
+              {service.last_failure ? <small className="failure-detail">{service.last_failure}</small> : null}
             </article>
           ))}
         </div>
 
         {launcherError ? <p className="launcher-error">{launcherError}</p> : null}
+        {watchdogAlert ? (
+          <p className={`watchdog-alert ${watchdogAlert.severity}`}>
+            Watchdog: {watchdogAlert.service} · {watchdogAlert.message}
+            {watchdogAlert.restart_count ? ` · restart ${watchdogAlert.restart_count}` : ""}
+          </p>
+        ) : null}
 
         <section className="logs-panel">
           <div className="logs-header">

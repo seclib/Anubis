@@ -1,6 +1,15 @@
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
 .env
+desktop/node_modules/
+desktop/dist/
+desktop/src-tauri/target/
+*.log
 state/runtime.json
 state/vector_store.json
 state/autonomous_git_history.json

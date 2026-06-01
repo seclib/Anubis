@@ -31,17 +31,24 @@
 ## Local Commands
 
 ```bash
-python -m venv .venv
-source .venv/bin/activate
-pip install -r backend/requirements.txt
+make setup
 docker compose up -d qdrant
-./scripts/dev_backend.sh
+make backend
 ```
 
 In another terminal:
 
 ```bash
-cd desktop
-npm install
-npm run tauri dev
+make desktop
 ```
+
+Before committing changes:
+
+```bash
+make check
+```
+
+`make check` compiles the Python packages, runs the unit test suite, and builds
+the desktop app when `desktop/node_modules` is already installed.
+
+See `docs/GIT_WORKFLOW.md` for branch, pull request, and release hygiene.

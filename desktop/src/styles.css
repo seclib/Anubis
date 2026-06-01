@@ -103,6 +103,10 @@ button:disabled {
   border-radius: 6px;
 }
 
+.status-tile.is-running {
+  border-color: #3f6d4b;
+}
+
 .status-tile div {
   display: flex;
   align-items: center;
@@ -143,6 +147,31 @@ button:disabled {
   background: #4a2326;
   border: 1px solid #7a3a40;
   border-radius: 6px;
+}
+
+.watchdog-alert {
+  margin: 0 16px 12px;
+  padding: 8px 10px;
+  color: #f3ead2;
+  background: #3b3321;
+  border: 1px solid #685832;
+  border-radius: 6px;
+}
+
+.watchdog-alert.error {
+  color: #ffd9d9;
+  background: #4a2326;
+  border-color: #7a3a40;
+}
+
+.watchdog-alert.info {
+  color: #d9f1df;
+  background: #213529;
+  border-color: #3f6d4b;
+}
+
+.failure-detail {
+  color: #ffb8ad;
 }
 
 .logs-panel {

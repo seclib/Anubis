@@ -18,6 +18,8 @@ POST /update
 POST /search_rag
 POST /embed
 POST /agent_query
+GET  /health
+GET  /health/ready
 ```
 
 ## Requests

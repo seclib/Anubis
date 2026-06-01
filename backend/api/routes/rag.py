@@ -1,26 +1,42 @@
+from functools import lru_cache
+
 from fastapi import APIRouter
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 
 from backend.rag.indexer import RagIndexer
 from backend.rag.retriever import RagRetriever
 
 
 router = APIRouter()
-indexer = RagIndexer()
-retriever = RagRetriever()
 
 
 class SearchRequest(BaseModel):
-    query: str
-    limit: int = 6
+    query: str = Field(min_length=1)
+    limit: int = Field(default=6, ge=1, le=50)
+
+
+@lru_cache
+def get_indexer() -> RagIndexer:
+    return RagIndexer()
+
+
+@lru_cache
+def get_retriever() -> RagRetriever:
+    return RagRetriever()
+
+
+def reset_route_state() -> None:
+    """Clear cached route services for tests and config reloads."""
+    get_indexer.cache_clear()
+    get_retriever.cache_clear()
 
 
 @router.post("/search")
 def search(payload: SearchRequest) -> dict[str, object]:
-    return {"chunks": retriever.search(payload.query, payload.limit)}
+    return {"chunks": get_retriever().search(payload.query, payload.limit)}
 
 
 @router.post("/reindex")
 def reindex() -> dict[str, object]:
-    count = indexer.reindex_all()
+    count = get_indexer().reindex_all()
     return {"status": "indexed", "chunks": count}

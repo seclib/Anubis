@@ -1,0 +1,182 @@
+name: Anubis Desktop OS CI
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+  workflow_dispatch:
+    inputs:
+      build_native_desktop:
+        description: "Build the native Tauri desktop launcher"
+        required: false
+        default: "false"
+        type: choice
+        options:
+          - "false"
+          - "true"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: anubis-ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  backend:
+    name: Backend, imports, and agent integrity
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install -r requirements.txt
+          python -m pip install -r backend/requirements.txt
+
+      - name: Validate Python syntax
+        run: |
+          python -m compileall -q \
+            agent api app backend cli core crawler executor intelligence knowledge \
+            llm memory monitoring rag retrieval runtime services storage tools workers tests
+
+      - name: Ensure imports are not broken
+        run: |
+          python - <<'PY'
+          import importlib
+
+          modules = [
+              "agent.loop",
+              "agent.multi_agent",
+              "agent.orchestrator_agent",
+              "agent.coder_agent",
+              "agent.reviewer_agent",
+              "agent.tester_agent",
+              "agent.debugger_agent",
+              "backend.main",
+              "backend.api.routes.health",
+              "backend.api.routes.local",
+              "backend.api.routes.notes",
+              "backend.api.routes.rag",
+              "backend.rag.indexer",
+              "backend.rag.retriever",
+              "runtime.agent_runner",
+              "runtime.dependencies",
+              "runtime.tool_registry",
+          ]
+
+          for module in modules:
+              importlib.import_module(module)
+              print(f"import ok: {module}")
+          PY
+
+      - name: Check agent module integrity
+        run: |
+          python - <<'PY'
+          from agent.multi_agent import AGENT_SPECS
+
+          expected_agents = {
+              "orchestrator_agent",
+              "planner_agent",
+              "coder_agent",
+              "reviewer_agent",
+              "tester_agent",
+              "debugger_agent",
+              "memory_agent",
+          }
+
+          actual_agents = set(AGENT_SPECS)
+          missing = expected_agents - actual_agents
+          extra = actual_agents - expected_agents
+          if missing or extra:
+              raise SystemExit(f"agent roster mismatch missing={missing} extra={extra}")
+
+          for name, spec in AGENT_SPECS.items():
+              for field in ("name", "role", "model", "prompt"):
+                  value = getattr(spec, field)
+                  if not isinstance(value, str) or not value.strip():
+                      raise SystemExit(f"{name}.{field} is empty or invalid")
+
+          print(f"agent integrity ok: {len(AGENT_SPECS)} agents")
+          PY
+
+      - name: Run backend tests
+        run: python -m unittest discover -s tests -p 'test*.py'
+
+  frontend:
+    name: Node syntax and desktop web build
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package.json
+
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm install
+
+      - name: Validate TypeScript and Node syntax
+        working-directory: desktop
+        run: npm exec tsc -- --noEmit
+
+      - name: Build desktop web UI
+        working-directory: desktop
+        run: npm run build
+
+  native-desktop:
+    name: Optional native Tauri launcher build
+    runs-on: ubuntu-latest
+    needs:
+      - backend
+      - frontend
+    if: ${{ github.event_name == 'workflow_dispatch' && inputs.build_native_desktop == 'true' }}
+
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Install Tauri Linux dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y \
+            libwebkit2gtk-4.1-dev \
+            libjavascriptcoregtk-4.1-dev \
+            libsoup-3.0-dev \
+            libgtk-3-dev \
+            libayatana-appindicator3-dev \
+            librsvg2-dev
+
+      - name: Set up Node
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: desktop/package.json
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install frontend dependencies
+        working-directory: desktop
+        run: npm install
+
+      - name: Build native launcher
+        working-directory: desktop
+        run: npm run tauri -- build
