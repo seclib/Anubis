@@ -1,162 +1,282 @@
-# Anubis Desktop OS
+# Anubis - Systeme autonome local
 
-Anubis Desktop OS is a local AI workspace for notes, memory, and an assistant that helps you organize knowledge and work through tasks.
+Anubis est un systeme d'agent IA local, minimal et modulaire, construit autour d'une verite fichier: le vault Obsidian. Le backend expose une API FastAPI, indexe les notes Markdown dans Qdrant, execute une boucle autonome planner/executor/critic, surveille le vault en temps reel et fait evoluer les competences sous forme de fichiers Markdown.
 
-It runs on your Linux computer and gives you a desktop app where you can:
+## Changements operes
 
-- write and edit notes
-- ask an AI assistant questions
-- save useful knowledge into memory
-- run autonomous agent workflows
-- see system health at a glance
-- explore skills, agents, and memory through dashboard views
+### API FastAPI de production
 
-![Anubis Desktop OS dashboard](docs/screenshots/readme-dashboard.png)
+Ajout d'une couche API simple dans `backend/api/routes/production.py`, montee dans `backend/main.py`.
+
+Endpoints principaux:
+
+- `POST /ask`: lance la boucle autonome asynchrone.
+- `POST /sync`: re-indexe manuellement le vault Obsidian.
+- `POST /memory`: recherche du contexte pertinent dans la memoire vectorielle.
+
+Les anciennes routes desktop et RAG restent disponibles.
+
+### Boucle autonome asynchrone
+
+Ajout de `backend/agent/async_loop.py` et `backend/agent/multi_agent.py`.
+
+La boucle suit le flux:
+
+```text
+task -> planner -> executor -> critic -> memory update -> result
+```
+
+Roles:
+
+- `Planner`: recupere la memoire et decompose la tache.
+- `Executor`: execute les etapes et appelle les outils autorises.
+- `Critic`: valide le resultat et decide si une relance est necessaire.
+
+Les resultats sont sauvegardes dans `vault/agent-runs/*.md`, puis re-indexes.
+
+### Memoire vectorielle Qdrant
+
+Le pipeline RAG a ete etendu:
+
+- `backend/rag/indexer.py`: ingestion complete ou incrementale.
+- `backend/rag/qdrant_store.py`: upsert, recherche semantique et suppression par chemin.
+- `backend/rag/chunker.py`: decoupe Markdown.
+- `backend/rag/embedder.py`: abstraction d'embedding locale/remplacable.
+
+Qdrant sert de couche de recherche semantique. Le vault Obsidian reste la source de verite.
+
+### Watcher Obsidian temps reel
+
+Ajout et durcissement de `backend/watcher/markdown_watcher.py`.
+
+Fonctions:
+
+- surveillance recursive des fichiers `.md`;
+- detection create/update/delete/move;
+- debounce pour eviter les doublons;
+- ingestion incrementale uniquement;
+- fichier d'etat avec hash SHA-256;
+- suppression des vecteurs quand une note est supprimee.
+
+Script:
+
+```bash
+.venv/bin/python scripts/watch_obsidian.py
+```
+
+### Systeme de skills
+
+Ajout de `backend/skills/parser.py` et `backend/skills/engine.py`.
+
+Fonctions:
+
+- lecture des skills Markdown depuis le vault;
+- detection de taches repetees;
+- extraction de patterns reutilisables;
+- generation de nouveaux skills;
+- validation par critic avant sauvegarde;
+- stockage dans `vault/skills/*.md`;
+- re-indexation automatique du skill cree.
+
+Format de skill:
+
+```markdown
+# skill: nom_du_skill
+tags: [auto-generated, skill]
+
+## trigger
+Quand utiliser ce skill.
+
+## procedure
+1. Etape reutilisable.
+2. Validation.
+3. Memoire.
+```
+
+### Meta-agent d'amelioration
+
+Ajout de `backend/agent/meta_agent.py`.
+
+Le meta-agent analyse les runs passes et propose des ameliorations pour:
+
+- prompts systeme;
+- definitions de skills;
+- structure de boucle agentique;
+- strategies de recuperation apres erreur.
+
+Il ne modifie pas le systeme directement. Les propositions sont validees par critic puis sauvegardees dans:
+
+```text
+vault/meta-agent/proposals/
+```
+
+Script:
+
+```bash
+.venv/bin/python scripts/run_meta_agent.py
+```
+
+### Sandbox d'execution d'outils
+
+Ajout de `backend/tools/sandbox.py`.
+
+Architecture:
+
+```text
+ToolRequest -> ToolValidator -> SandboxExecutor -> JSONL Logger
+```
+
+Regles:
+
+- commandes whitelistees uniquement;
+- execution limitee au dossier projet;
+- blocage des operations dangereuses;
+- pas de shell control, expansion ou redirection;
+- pas de reseau sauf autorisation explicite;
+- timeout sur chaque execution;
+- journalisation deterministe dans `state/backend_tool_audit.jsonl`.
+
+### Scripts ajoutes
+
+```text
+scripts/ingest_obsidian.py      # ingestion manuelle vault -> Qdrant
+scripts/run_agent.py            # boucle agent simple
+scripts/run_multi_agent.py      # boucle planner/executor/critic
+scripts/run_skill_engine.py     # observation + generation de skills
+scripts/run_meta_agent.py       # analyse et propositions d'amelioration
+scripts/watch_obsidian.py       # watcher temps reel du vault
+```
+
+## Structure minimale
+
+```text
+backend/
+  main.py
+  api/routes/
+    production.py
+  agent/
+    async_loop.py
+    llm.py
+    loop.py
+    meta_agent.py
+    multi_agent.py
+    prompts.py
+    tools.py
+  rag/
+    chunker.py
+    embedder.py
+    indexer.py
+    qdrant_store.py
+    retriever.py
+  skills/
+    engine.py
+    parser.py
+  tools/
+    sandbox.py
+  watcher/
+    markdown_watcher.py
+vault/
+  skills/
+    docker_debug.md
+scripts/
+  ingest_obsidian.py
+  run_agent.py
+  run_meta_agent.py
+  run_multi_agent.py
+  run_skill_engine.py
+  watch_obsidian.py
+```
 
 ## Lancement rapide
 
-```bash
-./start.sh
-```
-
-Cette commande lance le backend puis le desktop. Les logs du backend sont écrits dans `state/dev_servers/anubis-backend.log`.
-
-Options utiles:
+Demarrer Qdrant:
 
 ```bash
-./start.sh --backend-only
-./start.sh --desktop-only
+docker compose up -d qdrant
 ```
 
-## Who It Is For
-
-Anubis is for people who want a local AI workspace that feels more like a personal operating desk than a chat box.
-
-You can use it for:
-
-- project notes
-- research collections
-- personal knowledge
-- planning
-- summaries
-- AI-assisted writing
-- local experimentation
-
-## Key Features
-
-### Desktop Launcher
-
-Open Anubis from your application menu without typing commands.
-
-![Anubis in the application menu](docs/screenshots/readme-application-menu.png)
-
-### Brain Dashboard
-
-See whether Anubis is running, how much memory is available, what the assistant system is doing, and what recent activity happened.
-
-![Brain Dashboard](docs/screenshots/readme-brain-dashboard.png)
-
-### Notes And Memory
-
-Write Markdown notes in the vault. Anubis can use those notes as memory when answering questions.
-
-![Vault and note editor](docs/screenshots/readme-vault-editor.png)
-
-### AI Assistant
-
-Ask questions, summarize notes, turn text into checklists, and use your saved knowledge while working.
-
-![AI assistant panel](docs/screenshots/readme-ai-assistant.png)
-
-### Skill And Cognitive Graph Views
-
-Explore how skills, agents, memory groups, and relationships connect inside Anubis.
-
-![Cognitive Graph View](docs/screenshots/readme-cognitive-graph.png)
-
-### Local First
-
-Anubis is designed to run on your own machine. Your notes and local state live inside the Anubis folder unless you configure another location.
-
-## Installation
-
-The easiest installation path is the one-click installer:
+Indexer le vault:
 
 ```bash
-./install.sh
+.venv/bin/python scripts/ingest_obsidian.py
 ```
 
-The installer prepares the app, creates the local environment, initializes the vault, configures local memory services, and installs the desktop launcher.
-
-For installer options:
+Lancer le watcher Obsidian:
 
 ```bash
-./install.sh --help
+.venv/bin/python scripts/watch_obsidian.py
 ```
 
-Common options:
+Lancer l'API:
 
 ```bash
-./install.sh --no-qdrant
-./install.sh --no-system
-./install.sh --build-desktop
+.venv/bin/uvicorn backend.main:app --host 127.0.0.1 --port 8000
 ```
 
-## Quick Start
-
-1. Install Anubis:
-
-   ```bash
-   ./install.sh
-   ```
-
-2. Open your application menu.
-
-3. Search for **Anubis Desktop OS**.
-
-4. Click the Anubis icon.
-
-5. In the app, click **Start Anubis** if the system is stopped.
-
-6. Open a note from the **Vault** panel.
-
-7. Ask the assistant a question in the **Agent** panel.
-
-![Anubis ready to use](docs/screenshots/readme-ready.png)
-
-## Desktop Launcher
-
-If you only want to install or refresh the desktop menu entry, run:
+Interroger la memoire:
 
 ```bash
-scripts/install_desktop_entry.sh
+curl -X POST http://127.0.0.1:8000/memory \
+  -H 'Content-Type: application/json' \
+  -d '{"query":"agent memory","limit":6}'
 ```
 
-This installs:
+Lancer l'agent autonome:
 
-- the application menu entry
-- the Anubis icon
-- the launcher wrapper
+```bash
+curl -X POST http://127.0.0.1:8000/ask \
+  -H 'Content-Type: application/json' \
+  -d '{"task":"summarize project memory","max_rounds":2}'
+```
 
-Supported desktop environments include GNOME, KDE, and XFCE on Debian, Ubuntu, and Kali Linux.
+## Commandes utiles
 
-## Backing Up Your Data
+Boucle multi-agent:
 
-To back up your Anubis workspace, copy these folders from the Anubis folder:
+```bash
+.venv/bin/python scripts/run_multi_agent.py "inspect project tests"
+```
 
-- `vault`
-- `state`
-- `.agents`
+Generation de skills:
 
-Close Anubis before copying them.
+```bash
+.venv/bin/python scripts/run_skill_engine.py "triage qdrant indexing failure"
+.venv/bin/python scripts/run_skill_engine.py --improve
+```
 
-## Documentation
+Meta-agent:
 
-- User guide: [docs/USER_GUIDE.md](docs/USER_GUIDE.md)
-- Desktop launcher: [docs/DESKTOP_LAUNCHER.md](docs/DESKTOP_LAUNCHER.md)
-- Architecture: [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md)
-- Local API notes: [docs/LOCAL_API.md](docs/LOCAL_API.md)
+```bash
+.venv/bin/python scripts/run_meta_agent.py --limit 50
+```
 
-## Project Status
+Verification:
 
-Anubis is an active local AI desktop project. The current focus is making the desktop app, memory system, assistant workflow, and installer reliable and easy to use.
+```bash
+.venv/bin/python -m compileall backend scripts
+.venv/bin/python -m unittest tests.test_backend_desktop_api
+```
+
+## Variables utiles
+
+```text
+ANUBIS_VAULT_PATH=vault
+ANUBIS_SKILLS_PATH=vault/skills
+QDRANT_URL=http://localhost:6333
+QDRANT_COLLECTION=anubis_chunks
+ANUBIS_LLM_MODEL=qwen2.5-coder:7b
+OLLAMA_BASE_URL=http://localhost:11434
+ANUBIS_TOOL_TIMEOUT_SECONDS=30
+ANUBIS_TOOL_LOG_PATH=state/backend_tool_audit.jsonl
+```
+
+## Principe de conception
+
+Anubis suit une approche Karpathy-style:
+
+- fichiers Markdown comme source de verite;
+- Qdrant comme index semantique regenerable;
+- boucles simples et lisibles;
+- peu d'abstractions;
+- validation avant mutation;
+- autonomie progressive et auditable.
