@@ -1,0 +1,82 @@
+{
+  "conversation_id": "example-conversation",
+  "final_response": "Executor draft: completed the planned pipeline. User request: What did we decide about local-first memory?. Successful tools: memory_retrieve.",
+  "approved": true,
+  "iterations": 1,
+  "session": {
+    "conversation_id": "example-conversation",
+    "user_input": "What did we decide about local-first memory?",
+    "metadata": {}
+  },
+  "plan": {
+    "goal": "What did we decide about local-first memory?",
+    "subtasks": [
+      {
+        "id": 1,
+        "task": "Retrieve relevant memory before drafting an answer.",
+        "tool_needed": true,
+        "tool_name": "memory_retrieve",
+        "dependencies": []
+      },
+      {
+        "id": 2,
+        "task": "Synthesize a grounded response from retrieved memory and user input.",
+        "tool_needed": false,
+        "tool_name": null,
+        "dependencies": [
+          1
+        ]
+      }
+    ],
+    "execution_order": [
+      1,
+      2
+    ],
+    "risk_notes": "Mock planner: verify tool outputs before relying on them.",
+    "confidence": 0.82
+  },
+  "executor_output": {
+    "executed_steps": [
+      {
+        "step_id": 1,
+        "tool_used": "memory_retrieve",
+        "input": {
+          "query": "What did we decide about local-first memory?",
+          "limit": 5
+        },
+        "output": {
+          "memories": []
+        },
+        "status": "success"
+      },
+      {
+        "step_id": 2,
+        "tool_used": null,
+        "input": {
+          "task": "Synthesize a grounded response from retrieved memory and user input."
+        },
+        "output": {
+          "note": "No tool required; task carried into draft synthesis."
+        },
+        "status": "success"
+      }
+    ],
+    "draft_response": "Executor draft: completed the planned pipeline. User request: What did we decide about local-first memory?. Successful tools: memory_retrieve.",
+    "missing_info": [],
+    "execution_errors": []
+  },
+  "critic_output": {
+    "score": 0.91,
+    "approved": true,
+    "issues": [],
+    "fix_instructions": [],
+    "final_response": "Executor draft: completed the planned pipeline. User request: What did we decide about local-first memory?. Successful tools: memory_retrieve."
+  },
+  "memory_write_decision": {
+    "should_store": false,
+    "reason": "No explicit durable-memory marker was detected. Memory is not auto-written.",
+    "candidate": null,
+    "namespace": "orchestrator",
+    "requires_user_confirmation": true
+  }
+}

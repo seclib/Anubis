@@ -1,0 +1,23 @@
+{
+  "conversation_id": "generated-uuid",
+  "final_output": "Tool result: search completed for memory architecture",
+  "memory_decision": {
+    "should_store": false,
+    "reason": "No durable memory marker found."
+  },
+  "steps": [
+    {
+      "action_type": "tool_call",
+      "tool_call": {
+        "tool_name": "web_search",
+        "parameters": {
+          "query": "memory architecture"
+        }
+      }
+    },
+    {
+      "action_type": "respond",
+      "final_output": "Tool result: search completed for memory architecture"
+    }
+  ]
+}

@@ -1,0 +1,32 @@
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.12-slim AS base
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1
+WORKDIR /opt/anubis
+RUN useradd --create-home --shell /usr/sbin/nologin anubis
+
+COPY anubis/packages ./packages
+COPY anubis/services/tools ./services/tools
+COPY anubis/services/ai-core ./services/ai-core
+
+RUN pip install --upgrade pip \
+    && pip install -e ./packages/prompt-engine \
+    && pip install -e ./packages/memory-sdk \
+    && pip install -e ./services/tools \
+    && pip install -e ./services/ai-core
+
+RUN mkdir -p /var/lib/anubis /workspace/sandbox \
+    && chown -R anubis:anubis /var/lib/anubis /workspace/sandbox /opt/anubis
+
+USER anubis
+EXPOSE 8000
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/health', timeout=2).read()"
+
+FROM base AS development
+CMD ["uvicorn", "anubis_ai_core.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+
+FROM base AS production
+CMD ["sh", "-c", "uvicorn anubis_ai_core.main:create_app --factory --host 0.0.0.0 --port 8000 --workers ${ANUBIS_WORKERS:-2}"]

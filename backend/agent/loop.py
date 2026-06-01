@@ -26,28 +26,28 @@ class AgentLoop:
     def _answer_from_chunks(self, message: str, chunks: list[dict[str, object]]) -> str:
         if not chunks:
             return (
-                "Aucun chunk RAG pertinent trouve. "
-                "Je peux creer ou enrichir une note Markdown si cette information doit devenir durable."
+                "I could not find anything relevant in your workspace yet. "
+                "Add a note or import a document and I will use it automatically."
             )
 
-        citations = self._format_citations(chunks)
+        snippets = self._format_snippets(chunks)
         return (
-            "RAG verifie. Voici les sources les plus pertinentes pour traiter la demande: "
-            f"{message}\n\nSources:\n{citations}"
+            "I found relevant workspace context for your question: "
+            f"{message}\n\n{snippets}"
         )
 
-    def _format_citations(self, chunks: list[dict[str, object]]) -> str:
+    def _format_snippets(self, chunks: list[dict[str, object]]) -> str:
         lines = []
         seen = set()
         for chunk in chunks:
             path = str(chunk.get("path", "unknown.md"))
-            line_start = chunk.get("line_start", "?")
-            line_end = chunk.get("line_end", "?")
-            key = (path, line_start, line_end)
+            text = str(chunk.get("text", "")).strip()
+            key = (path, text)
             if key in seen:
                 continue
             seen.add(key)
-            lines.append(f"- {path}:{line_start}-{line_end}")
+            preview = text[:220] + ("..." if len(text) > 220 else "")
+            lines.append(f"- {preview}")
         return "\n".join(lines)
 
     def _memory_suggestion(self, message: str, chunks: list[dict[str, object]]) -> str | None:
@@ -55,4 +55,4 @@ class AgentLoop:
             return None
         if len(message.strip()) < 40:
             return None
-        return "Information potentiellement nouvelle: proposer une note Markdown ou une injection memoire."
+        return "This may be new information worth saving as a note."

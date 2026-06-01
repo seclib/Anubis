@@ -1,0 +1,45 @@
+# Development overlay.
+# Start: docker compose --env-file ../env/.env -f docker-compose.yml -f docker-compose.dev.yml up --build
+# Hot reload is enabled for Python services.
+
+services:
+  ai-core:
+    build:
+      target: development
+    environment:
+      ANUBIS_ENV: development
+      ANUBIS_LOG_LEVEL: DEBUG
+    volumes:
+      - ../../anubis/services/ai-core/src:/opt/anubis/services/ai-core/src:ro
+      - ../../anubis/services/tools/src:/opt/anubis/services/tools/src:ro
+      - ../../anubis/packages/prompt-engine/src:/opt/anubis/packages/prompt-engine/src:ro
+      - ../../anubis/packages/memory-sdk/src:/opt/anubis/packages/memory-sdk/src:ro
+    command: ["uvicorn", "anubis_ai_core.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8000", "--reload"]
+    ports:
+      - "${AI_CORE_PORT:-8000}:8000"
+
+  rag-service:
+    build:
+      target: development
+    environment:
+      ANUBIS_ENV: development
+      ANUBIS_LOG_LEVEL: DEBUG
+    volumes:
+      - ../../anubis/services/rag/src:/opt/anubis/services/rag/src:ro
+    command: ["uvicorn", "anubis_rag.main:create_app", "--factory", "--host", "0.0.0.0", "--port", "8001", "--reload"]
+    ports:
+      - "${RAG_PORT:-8001}:8001"
+
+  tool-runner:
+    build:
+      target: development
+    environment:
+      ANUBIS_ENV: development
+      ANUBIS_LOG_LEVEL: DEBUG
+    read_only: false
+    volumes:
+      - ../../anubis/services/tools/src:/opt/anubis/services/tools/src:ro
+      - tool_sandbox:/workspace/sandbox
+    command: ["uvicorn", "anubis_tools.runner:create_app", "--factory", "--host", "0.0.0.0", "--port", "8002", "--reload"]
+    ports:
+      - "${TOOL_RUNNER_PORT:-8002}:8002"

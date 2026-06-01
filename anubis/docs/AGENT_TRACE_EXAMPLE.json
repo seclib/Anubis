@@ -1,0 +1,79 @@
+{
+  "conversation_id": "example-conversation",
+  "final_output": "Agent loop completed. Observed 2 memory item(s) and 2 tool result(s). This local mock response follows the structured agent contract.",
+  "steps": [
+    {
+      "observation": "The user request appears to require durable context.",
+      "reasoning_summary": "Retrieve memory before answering.",
+      "action_type": "retrieve_memory",
+      "tool_call": {
+        "tool_name": "memory_retrieve",
+        "input_schema": {
+          "type": "object"
+        },
+        "parameters": {
+          "query": "What did we decide about local-first memory?",
+          "limit": 5
+        },
+        "async_flag": false
+      },
+      "final_output": null,
+      "confidence_score": 0.72
+    },
+    {
+      "observation": "The agent has enough context to produce a bounded response.",
+      "reasoning_summary": "Respond using current conversation, retrieved memory, and tool results.",
+      "action_type": "respond",
+      "tool_call": null,
+      "final_output": "Agent loop completed. Observed 2 memory item(s) and 2 tool result(s). This local mock response follows the structured agent contract.",
+      "confidence_score": 0.94
+    }
+  ],
+  "trace": [
+    {
+      "step_id": "example-step-1",
+      "conversation_id": "example-conversation",
+      "step_number": 1,
+      "input_state": {
+        "conversation_id": "example-conversation",
+        "message_count": 1,
+        "memory_context_count": 1,
+        "tool_result_count": 1,
+        "step_counter": 0,
+        "termination_flag": false
+      },
+      "decision_json": {
+        "action_type": "retrieve_memory",
+        "confidence_score": 0.72
+      },
+      "tool_outputs": [
+        {
+          "tool_name": "memory_retrieve",
+          "status": "succeeded"
+        }
+      ],
+      "timing_ms": 18.3,
+      "errors": []
+    },
+    {
+      "step_id": "example-step-2",
+      "conversation_id": "example-conversation",
+      "step_number": 2,
+      "input_state": {
+        "conversation_id": "example-conversation",
+        "message_count": 1,
+        "memory_context_count": 2,
+        "tool_result_count": 2,
+        "step_counter": 1,
+        "termination_flag": false
+      },
+      "decision_json": {
+        "action_type": "respond",
+        "confidence_score": 0.94
+      },
+      "tool_outputs": [],
+      "timing_ms": 7.1,
+      "errors": []
+    }
+  ]
+}

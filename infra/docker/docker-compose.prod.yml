@@ -1,0 +1,85 @@
+# Production overlay.
+# Start: docker compose --env-file ../env/.env -f docker-compose.yml -f docker-compose.prod.yml up -d --build
+# Horizontal scaling: docker compose --env-file ../env/.env -f docker-compose.yml -f docker-compose.prod.yml up -d --scale ai-core=3 --scale rag-service=2
+# For multi-replica host publishing, place a reverse proxy in front of ai-core and remove direct fixed host ports.
+
+services:
+  ai-core:
+    build:
+      target: production
+    environment:
+      ANUBIS_ENV: production
+      ANUBIS_LOG_LEVEL: ${ANUBIS_LOG_LEVEL:-INFO}
+    ports:
+      - target: 8000
+        published: "${AI_CORE_PORT_RANGE:-8000-8010}"
+        protocol: tcp
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 1G
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+
+  rag-service:
+    build:
+      target: production
+    environment:
+      ANUBIS_ENV: production
+    ports:
+      - target: 8001
+        published: "${RAG_PORT_RANGE:-8011-8020}"
+        protocol: tcp
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.25"
+          memory: 512M
+
+  tool-runner:
+    build:
+      target: production
+    environment:
+      ANUBIS_ENV: production
+    ports:
+      - target: 8002
+        published: "${TOOL_RUNNER_PORT_RANGE:-8021-8030}"
+        protocol: tcp
+    pids_limit: 256
+    mem_limit: 512m
+    cpus: 1.0
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+
+  qdrant:
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 3G
+        reservations:
+          cpus: "0.5"
+          memory: 1G
+
+  redis:
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+        reservations:
+          cpus: "0.1"
+          memory: 128M

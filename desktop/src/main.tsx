@@ -1,362 +1,448 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { createRoot } from "react-dom/client";
-import { invoke } from "@tauri-apps/api/core";
-import { listen } from "@tauri-apps/api/event";
-import { chat, listNotes, NoteSummary, RagChunk, readNote, writeNote } from "./api";
-import { BrainDashboard } from "./BrainDashboard";
-import { SkillGraphView } from "./SkillGraphView";
+import { ChatMessage, loadNotes, saveNote, searchWorkspace, sendChat, SearchResult, WorkspaceNote } from "./api";
 import "./styles.css";
 
-type ServiceStatus = {
-  name: string;
-  label: string;
-  status: "running" | "stopped" | string;
-  detail: string;
-  pid?: number | null;
-  restart_count?: number;
-  last_failure?: string | null;
-  heartbeat_age_ms?: number | null;
-};
+type View = "Library" | "Notes" | "Search" | "Assistant" | "Settings";
 
-type LauncherStatus = {
-  services: ServiceStatus[];
-  running: boolean;
-  healthy: boolean;
-};
+const storageKey = "anubis.desktop.notes";
 
-type LogLine = {
-  service: string;
-  stream: string;
-  line: string;
-};
+const starterNotes: WorkspaceNote[] = [
+  {
+    id: "welcome",
+    title: "Welcome",
+    path: "Notes/Welcome.md",
+    updatedAt: new Date().toISOString(),
+    content:
+      "# Welcome to Anubis\n\nAnubis is your local workspace for notes, documents, search, and conversation.\n\n- Write in Markdown\n- Drop files into the Library\n- Ask the assistant about what you are working on\n"
+  },
+  {
+    id: "daily",
+    title: "Daily Notes",
+    path: "Notes/Daily Notes.md",
+    updatedAt: new Date().toISOString(),
+    content: "# Daily Notes\n\n## Today\n\n- Review project direction\n- Capture ideas as they appear\n- Ask for help when a thread gets fuzzy\n"
+  }
+];
 
-type WatchdogEvent = {
-  service: string;
-  severity: "info" | "warning" | "error" | string;
-  message: string;
-  restart_count: number;
-};
+const navigation: Array<{ view: View; label: string }> = [
+  { view: "Library", label: "📁 Library" },
+  { view: "Notes", label: "📝 Notes" },
+  { view: "Search", label: "🔍 Search" },
+  { view: "Assistant", label: "🤖 Assistant" }
+];
 
-const emptyLauncher: LauncherStatus = {
-  services: [
-    { name: "backend", label: "Backend API", status: "stopped", detail: "Waiting for status" },
-    { name: "rag", label: "RAG / Qdrant", status: "stopped", detail: "Waiting for status" },
-    { name: "agent", label: "Agent Swarm", status: "stopped", detail: "Waiting for status" },
-    { name: "memory", label: "Memory System", status: "stopped", detail: "Waiting for status" },
-    { name: "frontend", label: "Desktop Frontend", status: "running", detail: "Tauri dashboard loaded" }
-  ],
-  running: false,
-  healthy: false
-};
-
-async function launcherInvoke<T>(command: string): Promise<T> {
-  return invoke<T>(command);
+function readLocalNotes(): WorkspaceNote[] {
+  const saved = window.localStorage.getItem(storageKey);
+  if (!saved) return starterNotes;
+  try {
+    const parsed = JSON.parse(saved);
+    return Array.isArray(parsed) && parsed.length > 0 ? parsed : starterNotes;
+  } catch {
+    return starterNotes;
+  }
 }
 
-function App() {
-  const [launcher, setLauncher] = useState<LauncherStatus>(emptyLauncher);
-  const [logs, setLogs] = useState<LogLine[]>([]);
-  const [launcherBusy, setLauncherBusy] = useState(false);
-  const [launcherError, setLauncherError] = useState("");
-  const [watchdogAlert, setWatchdogAlert] = useState<WatchdogEvent | null>(null);
-  const [notes, setNotes] = useState<NoteSummary[]>([]);
-  const [activePath, setActivePath] = useState("");
-  const [content, setContent] = useState("");
-  const [savedContent, setSavedContent] = useState("");
-  const [message, setMessage] = useState("");
-  const [answer, setAnswer] = useState("");
-  const [chunks, setChunks] = useState<RagChunk[]>([]);
-  const [status, setStatus] = useState("Ready");
-  const [selectedText, setSelectedText] = useState("");
-  const logEndRef = useRef<HTMLDivElement | null>(null);
-  const dirty = content !== savedContent;
-  const runningCount = launcher.services.filter((service) => service.status === "running").length;
+function persistLocalNotes(notes: WorkspaceNote[]) {
+  window.localStorage.setItem(storageKey, JSON.stringify(notes));
+}
 
-  const servicesByName = useMemo(
-    () => Object.fromEntries(launcher.services.map((service) => [service.name, service])),
-    [launcher.services]
+function makeId() {
+  return `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function titleFromContent(content: string) {
+  const heading = content
+    .split("\n")
+    .find((line) => line.trim().startsWith("#"))
+    ?.replace(/^#+\s*/, "")
+    .trim();
+  return heading || "Untitled";
+}
+
+function mockAssistantReply(message: string, note: WorkspaceNote | null) {
+  const scope = note ? `I looked at "${note.title}" while thinking about this.` : "I looked across your open workspace.";
+  if (message.trim().endsWith("?")) {
+    return `${scope}\n\nA useful next step is to turn the question into a short note, then add two or three concrete examples underneath it.`;
+  }
+  return `${scope}\n\nI can help refine this into a clearer note, outline, or action list.`;
+}
+
+function localSearch(notes: WorkspaceNote[], query: string): SearchResult[] {
+  const normalized = query.trim().toLowerCase();
+  if (!normalized) return [];
+  return notes
+    .map((note) => {
+      const index = note.content.toLowerCase().indexOf(normalized);
+      const excerpt =
+        index >= 0
+          ? note.content.slice(Math.max(0, index - 72), Math.min(note.content.length, index + 180)).trim()
+          : note.content.slice(0, 180).trim();
+      const score = `${note.title} ${note.path} ${note.content}`.toLowerCase().includes(normalized) ? 1 : 0;
+      return { id: note.id, title: note.title, path: note.path, excerpt, score };
+    })
+    .filter((result) => result.score > 0)
+    .map(({ score: _score, ...result }) => result);
+}
+
+function Sidebar({
+  view,
+  status,
+  onNavigate
+}: {
+  view: View;
+  status: string;
+  onNavigate: (view: View) => void;
+}) {
+  return (
+    <aside className="sidebar">
+      <button className="brand-button" onClick={() => onNavigate("Notes")}>
+        <strong>🧠 Anubis</strong>
+        <span>Desktop OS</span>
+      </button>
+      <nav aria-label="Workspace">
+        {navigation.map((item) => (
+          <button className={view === item.view ? "active" : ""} key={item.view} onClick={() => onNavigate(item.view)}>
+            {item.label}
+          </button>
+        ))}
+      </nav>
+      <button className={view === "Settings" ? "settings active" : "settings"} onClick={() => onNavigate("Settings")}>
+        ⚙️ Settings
+      </button>
+      <span className="save-state">{status}</span>
+    </aside>
   );
+}
 
-  useEffect(() => {
-    refreshLauncher();
-    launcherInvoke<LogLine[]>("get_anubis_logs")
-      .then(setLogs)
-      .catch(() => setLogs([]));
-    const timer = window.setInterval(refreshLauncher, 2500);
-    let unlisten: (() => void) | undefined;
-    let unlistenWatchdog: (() => void) | undefined;
-    listen<LogLine>("anubis-log", (event) => {
-      setLogs((current) => [...current.slice(-799), event.payload]);
-    }).then((dispose) => {
-      unlisten = dispose;
-    });
-    listen<WatchdogEvent>("anubis-watchdog", (event) => {
-      setWatchdogAlert(event.payload);
-      refreshLauncher();
-    }).then((dispose) => {
-      unlistenWatchdog = dispose;
-    });
-    return () => {
-      window.clearInterval(timer);
-      unlisten?.();
-      unlistenWatchdog?.();
-    };
-  }, []);
-
-  useEffect(() => {
-    listNotes().then(setNotes).catch(() => setNotes([]));
-  }, [servicesByName.backend?.status]);
-
-  useEffect(() => {
-    logEndRef.current?.scrollIntoView({ block: "end" });
-  }, [logs]);
-
-  async function refreshLauncher() {
-    try {
-      const next = await launcherInvoke<LauncherStatus>("get_anubis_status");
-      setLauncher(next);
-    } catch (error) {
-      setLauncherError(String(error));
-    }
+function Editor({
+  view,
+  notes,
+  activeNote,
+  searchQuery,
+  searchResults,
+  onCreateNote,
+  onOpenNote,
+  onImportFiles,
+  onUpdateNote,
+  onSearch
+}: {
+  view: View;
+  notes: WorkspaceNote[];
+  activeNote: WorkspaceNote | null;
+  searchQuery: string;
+  searchResults: SearchResult[];
+  onCreateNote: () => void;
+  onOpenNote: (id: string) => void;
+  onImportFiles: (files: FileList | null) => void;
+  onUpdateNote: (content: string) => void;
+  onSearch: (query: string) => void;
+}) {
+  if (view === "Library") {
+    return (
+      <section className="center-panel">
+        <header className="titlebar">
+          <div>
+            <h1>Library</h1>
+            <p>{notes.length} documents in your workspace</p>
+          </div>
+          <label className="primary-action">
+            Import
+            <input multiple type="file" onChange={(event) => onImportFiles(event.currentTarget.files)} />
+          </label>
+        </header>
+        <div className="drop-card">
+          <strong>Drop documents here</strong>
+          <span>Plain text and Markdown files become part of your workspace.</span>
+        </div>
+        <div className="document-grid">
+          {notes.map((note) => (
+            <button className="document-card" key={note.id} onClick={() => onOpenNote(note.id)}>
+              <strong>{note.title}</strong>
+              <span>{note.path}</span>
+              <p>{note.content.replace(/[#*_`>-]/g, "").slice(0, 140)}</p>
+            </button>
+          ))}
+        </div>
+      </section>
+    );
   }
 
-  async function runLauncherCommand(command: "start_anubis" | "stop_anubis" | "restart_anubis") {
-    setLauncherBusy(true);
-    setLauncherError("");
-    try {
-      const next = await launcherInvoke<LauncherStatus>(command);
-      setLauncher(next);
-      if (command !== "stop_anubis") {
-        listNotes().then(setNotes).catch(() => setNotes([]));
-      }
-    } catch (error) {
-      setLauncherError(String(error));
-    } finally {
-      setLauncherBusy(false);
-      refreshLauncher();
-    }
+  if (view === "Search") {
+    return (
+      <section className="center-panel">
+        <header className="titlebar">
+          <div>
+            <h1>Search</h1>
+            <p>Find notes and documents instantly.</p>
+          </div>
+        </header>
+        <input
+          autoFocus
+          className="search-field"
+          placeholder="Search your workspace"
+          value={searchQuery}
+          onChange={(event) => onSearch(event.target.value)}
+        />
+        <div className="result-list">
+          {searchResults.map((result) => (
+            <button key={result.id} onClick={() => onOpenNote(result.id)}>
+              <strong>{result.title}</strong>
+              <span>{result.path}</span>
+              <p>{result.excerpt}</p>
+            </button>
+          ))}
+          {searchQuery && searchResults.length === 0 ? <p className="empty-state">No matches yet.</p> : null}
+        </div>
+      </section>
+    );
   }
 
-  async function openNote(path: string) {
-    setStatus("Opening note");
-    const note = await readNote(path);
-    setActivePath(note.path);
-    setContent(note.content);
-    setSavedContent(note.content);
-    setStatus("Ready");
+  if (view === "Assistant") {
+    return (
+      <section className="center-panel quiet-panel">
+        <h1>Assistant</h1>
+        <p>Use the panel on the right to ask questions, shape notes, and work through ideas.</p>
+      </section>
+    );
   }
 
-  async function saveActiveNote() {
-    if (!activePath) return;
-    setStatus("Saving");
-    await writeNote(activePath, content);
-    setSavedContent(content);
-    setStatus("Saved");
-  }
-
-  async function sendMessage() {
-    if (!message.trim()) return;
-    setStatus("Querying RAG");
-    const result = await chat(message);
-    setAnswer(result.answer);
-    setChunks(result.chunks_used);
-    setStatus("Ready");
-  }
-
-  async function injectSelection() {
-    const text = selectedText.trim();
-    if (!text) return;
-    setMessage(`remember: ${text}`);
-    setStatus("Injecting memory");
-    const result = await chat(`remember: ${text}`);
-    setAnswer(result.answer);
-    setChunks(result.chunks_used);
-    setStatus("Memory injected");
-  }
-
-  function handleEditorSelect(event: React.SyntheticEvent<HTMLTextAreaElement>) {
-    const target = event.currentTarget;
-    setSelectedText(target.value.slice(target.selectionStart, target.selectionEnd));
+  if (view === "Settings") {
+    return (
+      <section className="center-panel">
+        <header className="titlebar">
+          <div>
+            <h1>Settings</h1>
+            <p>Local workspace preferences</p>
+          </div>
+        </header>
+        <div className="settings-grid">
+          <section>
+            <strong>Autosave</strong>
+            <span>Enabled</span>
+          </section>
+          <section>
+            <strong>Storage</strong>
+            <span>Local desktop workspace</span>
+          </section>
+          <section>
+            <strong>Assistant</strong>
+            <span>Powered by your knowledge base</span>
+          </section>
+        </div>
+      </section>
+    );
   }
 
   return (
-    <main className="app-shell">
-      <section className="launcher-panel">
-        <header className="launcher-header">
-          <div>
-            <h1>Anubis Desktop OS</h1>
-            <span>
-              {launcher.healthy
-                ? "System healthy"
-                : launcher.running
-                  ? "Services starting or partially available"
-                  : "System stopped"}
-              {" · "}
-              {runningCount}/{launcher.services.length} services running
-            </span>
-          </div>
-          <div className="launcher-actions">
-            <button disabled={launcherBusy} onClick={() => runLauncherCommand("start_anubis")}>
-              Start Anubis
-            </button>
-            <button disabled={launcherBusy} onClick={() => runLauncherCommand("stop_anubis")}>
-              Stop Anubis
-            </button>
-            <button disabled={launcherBusy} onClick={() => runLauncherCommand("restart_anubis")}>
-              Restart
-            </button>
-          </div>
-        </header>
-
-        <div className="status-grid">
-          {launcher.services.map((service) => (
-            <article className={`status-tile ${service.status === "running" ? "is-running" : ""}`} key={service.name}>
-              <div>
-                <strong>{service.label}</strong>
-                <span className={service.status === "running" ? "status-dot running" : "status-dot"} />
-              </div>
-              <p>{service.status}</p>
-              <small>
-                {service.detail}
-                {service.pid ? ` · pid ${service.pid}` : ""}
-                {service.restart_count ? ` · restarts ${service.restart_count}` : ""}
-                {service.heartbeat_age_ms ? ` · heartbeat ${Math.round(service.heartbeat_age_ms / 1000)}s` : ""}
-              </small>
-              {service.last_failure ? <small className="failure-detail">{service.last_failure}</small> : null}
-            </article>
-          ))}
+    <section className="center-panel editor-panel">
+      <header className="titlebar">
+        <div>
+          <h1>{activeNote?.title || "Untitled"}</h1>
+          <p>{activeNote?.path || "Notes/Untitled.md"}</p>
         </div>
+        <button className="primary-action" onClick={onCreateNote}>
+          New note
+        </button>
+      </header>
+      <textarea
+        className="markdown-editor"
+        placeholder="Write in Markdown..."
+        spellCheck
+        value={activeNote?.content || ""}
+        onChange={(event) => onUpdateNote(event.target.value)}
+      />
+    </section>
+  );
+}
 
-        {launcherError ? <p className="launcher-error">{launcherError}</p> : null}
-        {watchdogAlert ? (
-          <p className={`watchdog-alert ${watchdogAlert.severity}`}>
-            Watchdog: {watchdogAlert.service} · {watchdogAlert.message}
-            {watchdogAlert.restart_count ? ` · restart ${watchdogAlert.restart_count}` : ""}
-          </p>
-        ) : null}
+function ChatPanel({
+  messages,
+  input,
+  onInput,
+  onSend
+}: {
+  messages: ChatMessage[];
+  input: string;
+  onInput: (value: string) => void;
+  onSend: () => void;
+}) {
+  const endRef = useRef<HTMLDivElement | null>(null);
 
-        <section className="logs-panel">
-          <div className="logs-header">
-            <strong>Live Logs</strong>
-            <button onClick={() => setLogs([])}>Clear</button>
-          </div>
-          <div className="logs-stream" aria-label="Anubis service logs">
-            {logs.length === 0 ? (
-              <p className="empty">No launcher logs yet.</p>
-            ) : (
-              logs.map((entry, index) => (
-                <pre className={`log-line ${entry.stream}`} key={`${entry.service}-${index}`}>
-                  <span>[{entry.service}:{entry.stream}]</span> {entry.line}
-                </pre>
-              ))
-            )}
-            <div ref={logEndRef} />
-          </div>
-        </section>
-      </section>
+  useEffect(() => {
+    endRef.current?.scrollIntoView({ block: "end" });
+  }, [messages]);
 
-      <BrainDashboard launcher={launcher} launcherLogs={logs} />
+  return (
+    <aside className="chat-panel">
+      <header>
+        <div>
+          <h2>Assistant</h2>
+          <p>Powered by your knowledge base</p>
+        </div>
+      </header>
+      <div className="messages">
+        {messages.map((message) => (
+          <article className={message.role} key={message.id}>
+            <p>{message.content}</p>
+          </article>
+        ))}
+        <div ref={endRef} />
+      </div>
+      <div className="chat-input">
+        <textarea
+          placeholder="Ask Anubis..."
+          value={input}
+          onChange={(event) => onInput(event.target.value)}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) onSend();
+          }}
+        />
+        <button onClick={onSend}>Send</button>
+      </div>
+    </aside>
+  );
+}
 
-      <SkillGraphView />
+function App() {
+  const [view, setView] = useState<View>("Notes");
+  const [notes, setNotes] = useState<WorkspaceNote[]>(() => readLocalNotes());
+  const [activeId, setActiveId] = useState(() => readLocalNotes()[0]?.id || "");
+  const [status, setStatus] = useState("Saved");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [searchResults, setSearchResults] = useState<SearchResult[]>([]);
+  const [chatInput, setChatInput] = useState("");
+  const [messages, setMessages] = useState<ChatMessage[]>([
+    {
+      id: "hello",
+      role: "assistant",
+      content: "Hi. I can help summarize notes, find connections, and turn rough ideas into something clearer."
+    }
+  ]);
+  const autosaveRef = useRef<number | null>(null);
 
-      <section className="workspace-shell">
-        <aside className="vault-pane">
-          <header className="pane-header">
-            <div>
-              <h2>Vault</h2>
-              <span>Markdown memory</span>
-            </div>
-            <button className="icon-button" title="Refresh notes" onClick={() => listNotes().then(setNotes)}>
-              R
-            </button>
-          </header>
-          <nav className="note-list" aria-label="Markdown notes">
-            {notes.map((note) => (
-              <button
-                className={note.path === activePath ? "note active" : "note"}
-                draggable
-                key={note.path}
-                onClick={() => openNote(note.path)}
-                onDragStart={(event) => event.dataTransfer.setData("text/plain", note.path)}
-              >
-                <span>{note.title}</span>
-                <small>{note.path}</small>
-              </button>
-            ))}
-          </nav>
-        </aside>
+  const activeNote = useMemo(() => notes.find((note) => note.id === activeId) || notes[0] || null, [activeId, notes]);
 
-        <section className="editor-pane">
-          <header className="editor-bar">
-            <div>
-              <strong>{activePath || "No note selected"}</strong>
-              <span>{dirty ? "Unsaved changes" : status}</span>
-            </div>
-            <div className="actions">
-              <button onClick={injectSelection} disabled={!selectedText.trim()}>
-                Inject selection
-              </button>
-              <button onClick={saveActiveNote} disabled={!activePath || !dirty}>
-                Save
-              </button>
-            </div>
-          </header>
-          <textarea
-            className="markdown-editor"
-            placeholder="Open a Markdown note from the vault."
-            value={content}
-            onChange={(event) => setContent(event.target.value)}
-            onSelect={handleEditorSelect}
-            onDrop={(event) => {
-              const path = event.dataTransfer.getData("text/plain");
-              if (path.endsWith(".md")) openNote(path);
-            }}
-          />
-        </section>
+  useEffect(() => {
+    loadNotes().then((remoteNotes) => {
+      if (!remoteNotes || remoteNotes.length === 0) return;
+      setNotes(remoteNotes);
+      setActiveId(remoteNotes[0].id);
+      persistLocalNotes(remoteNotes);
+    });
+  }, []);
 
-        <aside className="agent-pane">
-          <header className="pane-header">
-            <div>
-              <h2>Agent</h2>
-              <span>Chat + RAG insights</span>
-            </div>
-          </header>
-          <section className="chat-box">
-            <textarea
-              placeholder="Ask Anubis. RAG is checked before answering."
-              value={message}
-              onChange={(event) => setMessage(event.target.value)}
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && (event.metaKey || event.ctrlKey)) sendMessage();
-              }}
-            />
-            <button onClick={sendMessage}>Send</button>
-          </section>
-          <section className="answer">
-            <h3>Answer</h3>
-            <p>{answer || "No response yet."}</p>
-          </section>
-          <section className="rag-panel">
-            <h3>Sources</h3>
-            {chunks.length === 0 ? (
-              <p className="empty">No chunks used yet.</p>
-            ) : (
-              chunks.map((chunk, index) => (
-                <article className="chunk" key={`${chunk.path}-${chunk.id}-${index}`}>
-                  <div>
-                    <strong>{chunk.heading || "Markdown chunk"}</strong>
-                    <span>{typeof chunk.score === "number" ? chunk.score.toFixed(3) : "n/a"}</span>
-                  </div>
-                  <small>
-                    {chunk.path} {chunk.line_start ? `:${chunk.line_start}-${chunk.line_end}` : ""}
-                  </small>
-                  <p>{chunk.text}</p>
-                </article>
-              ))
-            )}
-          </section>
-        </aside>
-      </section>
+  useEffect(() => {
+    persistLocalNotes(notes);
+  }, [notes]);
+
+  async function handleSearch(query: string) {
+    setSearchQuery(query);
+    if (!query.trim()) {
+      setSearchResults([]);
+      return;
+    }
+    const remoteResults = await searchWorkspace(query);
+    setSearchResults(remoteResults ?? localSearch(notes, query));
+  }
+
+  function handleCreateNote() {
+    const note: WorkspaceNote = {
+      id: makeId(),
+      title: "Untitled",
+      path: "Notes/Untitled.md",
+      updatedAt: new Date().toISOString(),
+      content: "# Untitled\n\n"
+    };
+    setNotes((current) => [note, ...current]);
+    setActiveId(note.id);
+    setView("Notes");
+    setStatus("Saved");
+  }
+
+  function handleOpenNote(id: string) {
+    setActiveId(id);
+    setView("Notes");
+  }
+
+  function handleUpdateNote(content: string) {
+    setStatus("Saving...");
+    const updatedAt = new Date().toISOString();
+    setNotes((current) =>
+      current.map((note) =>
+        note.id === activeNote?.id
+          ? {
+              ...note,
+              title: titleFromContent(content),
+              path: `Notes/${titleFromContent(content)}.md`,
+              updatedAt,
+              content
+            }
+          : note
+      )
+    );
+    if (autosaveRef.current) window.clearTimeout(autosaveRef.current);
+    autosaveRef.current = window.setTimeout(async () => {
+      const nextNote = notes.find((note) => note.id === activeNote?.id);
+      if (nextNote) await saveNote({ ...nextNote, content, title: titleFromContent(content), updatedAt });
+      setStatus("Saved");
+    }, 650);
+  }
+
+  async function handleImportFiles(files: FileList | null) {
+    if (!files?.length) return;
+    const imported = await Promise.all(
+      Array.from(files).map(async (file) => {
+        const content = await file.text();
+        const title = titleFromContent(content) || file.name.replace(/\.[^.]+$/, "");
+        return {
+          id: makeId(),
+          title,
+          path: `Library/${file.name}`,
+          content: content.startsWith("#") ? content : `# ${title}\n\n${content}`,
+          updatedAt: new Date().toISOString()
+        };
+      })
+    );
+    setNotes((current) => [...imported, ...current]);
+    setActiveId(imported[0].id);
+    setView("Library");
+    setStatus("Imported");
+  }
+
+  async function handleSendMessage() {
+    const text = chatInput.trim();
+    if (!text) return;
+    const userMessage: ChatMessage = { id: makeId(), role: "user", content: text };
+    setMessages((current) => [...current, userMessage]);
+    setChatInput("");
+    const answer = (await sendChat(text, activeNote)) ?? mockAssistantReply(text, activeNote);
+    setMessages((current) => [...current, { id: makeId(), role: "assistant", content: answer }]);
+  }
+
+  return (
+    <main
+      className="app-shell"
+      onDragOver={(event) => event.preventDefault()}
+      onDrop={(event) => {
+        event.preventDefault();
+        handleImportFiles(event.dataTransfer.files);
+      }}
+    >
+      <Sidebar status={status} view={view} onNavigate={setView} />
+      <Editor
+        activeNote={activeNote}
+        notes={notes}
+        searchQuery={searchQuery}
+        searchResults={searchResults}
+        view={view}
+        onCreateNote={handleCreateNote}
+        onImportFiles={handleImportFiles}
+        onOpenNote={handleOpenNote}
+        onSearch={handleSearch}
+        onUpdateNote={handleUpdateNote}
+      />
+      <ChatPanel input={chatInput} messages={messages} onInput={setChatInput} onSend={handleSendMessage} />
     </main>
   );
 }

@@ -12,6 +12,21 @@ It runs on your Linux computer and gives you a desktop app where you can:
 
 ![Anubis Desktop OS dashboard](docs/screenshots/readme-dashboard.png)
 
+## Lancement rapide
+
+```bash
+./start.sh
+```
+
+Cette commande lance le backend puis le desktop. Les logs du backend sont écrits dans `state/dev_servers/anubis-backend.log`.
+
+Options utiles:
+
+```bash
+./start.sh --backend-only
+./start.sh --desktop-only
+```
+
 ## Who It Is For
 
 Anubis is for people who want a local AI workspace that feels more like a personal operating desk than a chat box.

@@ -5,7 +5,7 @@ from unittest.mock import patch
 
 from fastapi.testclient import TestClient
 
-from backend.api.routes import brain, local, notes, rag, skills
+from backend.api.routes import brain, desktop, local, notes, rag, skills
 from backend.main import app
 from backend.vault.service import VaultService
 
@@ -18,11 +18,14 @@ class BackendDesktopApiTest(unittest.TestCase):
         local.reset_route_state()
         notes.reset_route_state()
         rag.reset_route_state()
+        desktop.reset_route_state()
         skills.reset_route_state()
         brain.reset_route_state()
         self.patchers = [
             patch("backend.api.routes.local.get_vault", return_value=self.vault),
             patch("backend.api.routes.notes.get_vault", return_value=self.vault),
+            patch("backend.api.routes.notes._index_all"),
+            patch("backend.api.routes.desktop.get_vault", return_value=self.vault),
             patch("backend.api.routes.skills.get_skills_dir", return_value=self.vault_path / "skills"),
             patch("backend.api.routes.brain._vault", return_value=self.vault),
         ]
@@ -116,6 +119,61 @@ class BackendDesktopApiTest(unittest.TestCase):
         self.assertIn("backend", payload["system_health"])
         self.assertTrue(payload["agent_activity"]["active_agents"])
         self.assertEqual(payload["architecture"]["live_updates"], "WebSocket /brain/ws")
+
+    def test_desktop_mvp_hides_internal_ai_surface(self) -> None:
+        with patch("backend.api.routes.desktop._index_all"):
+            ingest_response = self.client.post(
+                "/library/ingest",
+                json={"name": "Roadmap.txt", "content": "Ship a calm notes workspace."},
+            )
+
+        self.assertEqual(ingest_response.status_code, 200)
+        self.assertEqual(ingest_response.json()["path"], "library/Roadmap.md")
+
+        library_response = self.client.get("/library")
+        self.assertEqual(library_response.status_code, 200)
+        self.assertEqual(library_response.json()["items"][0]["title"], "Roadmap")
+
+        retriever = type(
+            "Retriever",
+            (),
+            {
+                "search": lambda _self, _query, _limit: [
+                    {
+                        "path": "library/Roadmap.md",
+                        "heading": "Roadmap",
+                        "text": "Ship a calm notes workspace.",
+                        "score": 0.92,
+                    }
+                ]
+            },
+        )()
+        with patch("backend.api.routes.desktop.get_retriever", return_value=retriever):
+            search_response = self.client.post("/search", json={"query": "workspace"})
+
+        self.assertEqual(search_response.status_code, 200)
+        search_payload = search_response.json()
+        self.assertEqual(search_payload["results"][0]["title"], "Roadmap")
+        self.assertNotIn("rag", str(search_payload).lower())
+
+        agent = type(
+            "Agent",
+            (),
+            {
+                "chat": lambda _self, _message: {
+                    "answer": "Use the roadmap note.",
+                    "chunks_used": [{"path": "library/Roadmap.md", "heading": "Roadmap", "text": "Ship a calm notes workspace."}],
+                }
+            },
+        )()
+        with patch("backend.api.routes.desktop.get_agent", return_value=agent):
+            assistant_response = self.client.post("/assistant/chat", json={"message": "What should I ship?"})
+
+        self.assertEqual(assistant_response.status_code, 200)
+        assistant_payload = assistant_response.json()
+        self.assertEqual(assistant_payload["answer"], "Use the roadmap note.")
+        self.assertNotIn("agent", str(assistant_payload).lower())
+        self.assertNotIn("embedding", str(assistant_payload).lower())
 
 
 if __name__ == "__main__":
