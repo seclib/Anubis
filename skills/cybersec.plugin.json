@@ -1,0 +1,34 @@
+{
+  "name": "cybersec",
+  "enabled": true,
+  "triggers": [
+    "cybersec",
+    "security",
+    "incident response",
+    "threat hunting",
+    "network discovery",
+    "port scanning",
+    "service fingerprinting",
+    "malware triage",
+    "anomaly detection",
+    "system hardening",
+    "firewall rules",
+    "privilege audit",
+    "/\\b(ids|intrusion detection|qdrant|obsidian memory)\\b/"
+  ],
+  "skills": [
+    "cybersec"
+  ],
+  "memory": {
+    "obsidian": [
+      "skills/cybersec",
+      "security",
+      "incidents"
+    ],
+    "qdrant": [
+      "cybersec",
+      "security",
+      "incidents"
+    ]
+  }
+}
