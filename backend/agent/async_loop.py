@@ -15,7 +15,7 @@ from backend.vault.service import VaultService
 class AsyncAgentLoop:
     def __init__(self, llm: LLM | None = None, max_rounds: int = 2) -> None:
         self.planner = Planner(llm=llm)
-        self.executor = Executor()
+        self.executor = Executor(llm=llm)
         self.critic = Critic(llm=llm)
         self.vault = VaultService()
         self.indexer = RagIndexer()
@@ -48,6 +48,7 @@ class AsyncAgentLoop:
         return {
             "task": task,
             "accepted": history[-1]["critique"]["accepted"],
+            "answer": self._answer(history),
             "memory_path": memory_path,
             "history": history,
         }

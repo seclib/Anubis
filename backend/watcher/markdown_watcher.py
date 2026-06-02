@@ -136,7 +136,7 @@ class MarkdownChangeHandler(FileSystemEventHandler):
         self.sync.sync_path(raw_path, action)
 
 
-def run(debounce_seconds: float = 0.5) -> None:
+def start_observer(debounce_seconds: float = 0.5) -> Observer:
     settings.vault_path.mkdir(parents=True, exist_ok=True)
     observer = Observer()
     observer.schedule(
@@ -146,12 +146,22 @@ def run(debounce_seconds: float = 0.5) -> None:
     )
     observer.start()
     logger.info("watching obsidian vault path=%s", settings.vault_path)
+    return observer
+
+
+def stop_observer(observer: Observer) -> None:
+    observer.stop()
+    observer.join()
+    logger.info("stopped obsidian vault watcher")
+
+
+def run(debounce_seconds: float = 0.5) -> None:
+    observer = start_observer(debounce_seconds=debounce_seconds)
     try:
         while True:
             time.sleep(1)
     finally:
-        observer.stop()
-        observer.join()
+        stop_observer(observer)
 
 
 if __name__ == "__main__":

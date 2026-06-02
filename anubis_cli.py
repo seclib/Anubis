@@ -8,7 +8,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).parent))
 
-from cli.app import main
+from cli.anubis import main
 
 
 if __name__ == "__main__":

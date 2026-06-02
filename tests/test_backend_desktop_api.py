@@ -1,11 +1,11 @@
 import tempfile
 import unittest
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from backend.api.routes import brain, desktop, local, notes, rag, skills
+from backend.api.routes import brain, desktop, local, notes, production, rag, skills
 from backend.main import app
 from backend.vault.service import VaultService
 
@@ -18,6 +18,7 @@ class BackendDesktopApiTest(unittest.TestCase):
         local.reset_route_state()
         notes.reset_route_state()
         rag.reset_route_state()
+        production.reset_route_state()
         desktop.reset_route_state()
         skills.reset_route_state()
         brain.reset_route_state()
@@ -28,9 +29,14 @@ class BackendDesktopApiTest(unittest.TestCase):
             patch("backend.api.routes.desktop.get_vault", return_value=self.vault),
             patch("backend.api.routes.skills.get_skills_dir", return_value=self.vault_path / "skills"),
             patch("backend.api.routes.brain._vault", return_value=self.vault),
+            patch("backend.api.routes.production.get_indexer"),
+            patch("backend.api.routes.production.get_retriever"),
         ]
-        for patcher in self.patchers:
-            patcher.start()
+        self.mocks = [patcher.start() for patcher in self.patchers]
+        self.mocks[-2].return_value.reindex_all.return_value = 3
+        self.mocks[-1].return_value.search.return_value = [
+            {"path": "notes/context.md", "heading": "Context", "text": "Anubis remembers files first.", "score": 0.9}
+        ]
         self.client = TestClient(
             app,
             base_url="http://127.0.0.1",
@@ -174,6 +180,29 @@ class BackendDesktopApiTest(unittest.TestCase):
         self.assertEqual(assistant_payload["answer"], "Use the roadmap note.")
         self.assertNotIn("agent", str(assistant_payload).lower())
         self.assertNotIn("embedding", str(assistant_payload).lower())
+
+    def test_production_contract_exposes_sync_memory_and_ask(self) -> None:
+        sync_response = self.client.post("/sync")
+        self.assertEqual(sync_response.status_code, 200)
+        self.assertEqual(sync_response.json(), {"status": "indexed", "chunks": 3})
+
+        memory_response = self.client.post("/memory", json={"query": "files first", "limit": 1})
+        self.assertEqual(memory_response.status_code, 200)
+        self.assertEqual(memory_response.json()["chunks"][0]["path"], "notes/context.md")
+
+        agent_result = {
+            "task": "Summarize Anubis",
+            "accepted": True,
+            "answer": "Anubis uses files first.",
+            "memory_path": "agent-runs/test.md",
+            "history": [],
+        }
+        with patch("backend.api.routes.production.AsyncAgentLoop") as loop_class:
+            loop_class.return_value.run = AsyncMock(return_value=agent_result)
+            ask_response = self.client.post("/ask", json={"task": "Summarize Anubis", "max_rounds": 2})
+
+        self.assertEqual(ask_response.status_code, 200)
+        self.assertEqual(ask_response.json()["answer"], "Anubis uses files first.")
 
 
 if __name__ == "__main__":

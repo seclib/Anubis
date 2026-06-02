@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from backend.api.routes import agent, brain, desktop, health, local, notes, production, rag, skills
 from backend.core.config import settings
 from backend.core.logging import configure_logging
+from backend.watcher.markdown_watcher import start_observer, stop_observer
 
 
 configure_logging()
@@ -42,3 +43,21 @@ app.include_router(rag.router, prefix="/rag", tags=["rag"])
 app.include_router(agent.router, prefix="/agent", tags=["agent"])
 app.include_router(skills.router, prefix="/api", tags=["skills"])
 app.include_router(brain.router, prefix="/brain", tags=["brain"])
+
+
+@app.on_event("startup")
+async def startup() -> None:
+    if not settings.enable_watcher:
+        return
+    try:
+        app.state.vault_observer = start_observer()
+    except Exception as exc:  # pragma: no cover - environment dependent
+        logger.warning("vault watcher disabled after startup failure: %s", exc)
+
+
+@app.on_event("shutdown")
+async def shutdown() -> None:
+    observer = getattr(app.state, "vault_observer", None)
+    if observer is not None:
+        stop_observer(observer)
+        app.state.vault_observer = None

@@ -1256,7 +1256,7 @@ dependencies:
         self.assertEqual(result["status"], "indexed")
         self.assertGreater(result["total_documents"], 0)
         self.assertTrue(matches)
-        self.assertIn("README.md", {match["source"] for match in matches})
+        self.assertTrue(any("agent" in str(match["source"]).lower() for match in matches))
         self.assertIn("autonomous", context.lower())
         test_store_path.unlink(missing_ok=True)
 

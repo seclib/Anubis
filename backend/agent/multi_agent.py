@@ -93,14 +93,20 @@ class Planner:
 
 
 class Executor:
-    def __init__(self, tools: AgentTools | None = None, sandbox: SandboxExecutor | None = None) -> None:
+    def __init__(
+        self,
+        llm: LLM | None = None,
+        tools: AgentTools | None = None,
+        sandbox: SandboxExecutor | None = None,
+    ) -> None:
+        self.llm = llm or OllamaLLM()
         self.tools = tools or AgentTools()
         self.sandbox = sandbox or SandboxExecutor()
 
     def execute(self, plan: Plan) -> list[StepResult]:
-        return [self._execute_step(step) for step in plan.steps]
+        return [self._execute_step(step, plan) for step in plan.steps]
 
-    def _execute_step(self, step: Step) -> StepResult:
+    def _execute_step(self, step: Step, plan: Plan) -> StepResult:
         if step.tool == "shell":
             request = ToolRequest(
                 command=str(step.args.get("command", "")),
@@ -116,7 +122,28 @@ class Executor:
                 return StepResult(step=step, ok=True, output=output)
             except Exception as exc:
                 return StepResult(step=step, ok=False, output=str(exc))
-        return StepResult(step=step, ok=True, output={"note": step.goal})
+        return StepResult(step=step, ok=True, output={"answer": self._answer_from_memory(step, plan)})
+
+    def _answer_from_memory(self, step: Step, plan: Plan) -> str:
+        prompt = {
+            "role": "executor",
+            "instruction": "Answer the task using retrieved memory first. Be concise and cite note paths when useful.",
+            "task": plan.task,
+            "retrieved_context": plan.context,
+            "step": asdict(step),
+        }
+        answer = self.llm.generate(json.dumps(prompt, ensure_ascii=False)).strip()
+        if answer:
+            return answer
+        snippets = []
+        for chunk in plan.context[:4]:
+            path = chunk.get("path", "memory")
+            text = str(chunk.get("text", "")).strip()
+            if text:
+                snippets.append(f"[{path}] {text[:700]}")
+        if snippets:
+            return "\n\n".join(snippets)
+        return step.goal
 
 
 class Critic:
@@ -127,6 +154,14 @@ class Critic:
         failed = [result for result in results if not result.ok]
         if failed:
             return Critique(accepted=False, retry=True, reason=f"{len(failed)} step(s) failed")
+        if not plan.context:
+            return Critique(
+                accepted=False,
+                retry=False,
+                reason="no relevant memory was retrieved before execution",
+            )
+        if not any(str(result.output).strip() for result in results):
+            return Critique(accepted=False, retry=True, reason="executor returned no usable output")
         prompt = {
             "role": "critic",
             "task": task,
@@ -154,7 +189,7 @@ class Critic:
 class MultiAgentLoop:
     def __init__(self, llm: LLM | None = None, max_rounds: int = 2) -> None:
         self.planner = Planner(llm=llm)
-        self.executor = Executor()
+        self.executor = Executor(llm=llm)
         self.critic = Critic(llm=llm)
         self.max_rounds = max_rounds
 
