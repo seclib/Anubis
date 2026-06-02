@@ -10,6 +10,8 @@ import { AgentMemory, AnubisAgentV2, RagDocument } from "../core/agent";
 import { createVaultRagRetriever } from "../core/rag";
 import type { ModuleRuntimeState } from "../core/modules/moduleTypes";
 
+export type AnubisView = "chat" | "vault" | "tools" | "plugins" | "settings";
+
 const initialMessages: ChatMessage[] = [
   {
     id: crypto.randomUUID(),
@@ -37,6 +39,7 @@ const agentMemory = new AgentMemory({
 });
 
 type AnubisState = {
+  activeView: AnubisView;
   busy: boolean;
   health: RuntimeHealth;
   input: string;
@@ -51,6 +54,7 @@ type AnubisState = {
   openPalette: () => void;
   refreshRuntime: () => Promise<void>;
   runAgent: (prompt?: string) => Promise<void>;
+  setActiveView: (view: AnubisView) => void;
   setInput: (input: string) => void;
   setModuleRuntime: (runtime: ModuleRuntimeState) => void;
   togglePalette: () => void;
@@ -58,6 +62,7 @@ type AnubisState = {
 };
 
 export const useAnubisStore = create<AnubisState>((set, get) => ({
+  activeView: "chat",
   busy: false,
   health: { status: "offline", apiUrl: "http://127.0.0.1:8000" },
   input: "",
@@ -151,6 +156,10 @@ export const useAnubisStore = create<AnubisState>((set, get) => ({
     } finally {
       set({ busy: false });
     }
+  },
+
+  setActiveView(activeView) {
+    set({ activeView });
   },
 
   setInput(input) {

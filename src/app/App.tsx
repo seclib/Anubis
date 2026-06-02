@@ -1,5 +1,5 @@
 import React, { FormEvent, useEffect, useMemo, useRef } from "react";
-import { Shell } from "./layout/Shell";
+import { Layout } from "./layout/Layout";
 import { Chat } from "./ui/Chat";
 import { CommandPalette } from "./ui/CommandPalette";
 import { InputBar } from "./ui/InputBar";
@@ -12,6 +12,7 @@ import "./ui/styles.css";
 export default function App() {
   const scrollerRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLTextAreaElement>(null);
+  const activeView = useAnubisStore((state) => state.activeView);
   const messages = useAnubisStore((state) => state.messages);
   const input = useAnubisStore((state) => state.input);
   const busy = useAnubisStore((state) => state.busy);
@@ -24,6 +25,7 @@ export default function App() {
   const closePalette = useAnubisStore((state) => state.closePalette);
   const refreshRuntime = useAnubisStore((state) => state.refreshRuntime);
   const runAgent = useAnubisStore((state) => state.runAgent);
+  const setActiveView = useAnubisStore((state) => state.setActiveView);
   const setInput = useAnubisStore((state) => state.setInput);
   const setModuleRuntime = useAnubisStore((state) => state.setModuleRuntime);
   const togglePalette = useAnubisStore((state) => state.togglePalette);
@@ -123,7 +125,7 @@ export default function App() {
   );
 
   return (
-    <Shell>
+    <Layout activeView={activeView} onChangeView={setActiveView}>
       <Chat messages={messages} busy={busy} scrollerRef={scrollerRef} />
       <InputBar value={input} busy={busy} inputRef={inputRef} onChange={setInput} onSubmit={submitPrompt} />
 
@@ -134,6 +136,6 @@ export default function App() {
         helpers={commandHelpers}
         onClose={closePalette}
       />
-    </Shell>
+    </Layout>
   );
 }
