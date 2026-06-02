@@ -1,0 +1,30 @@
+{
+  "name": "vault-memory",
+  "display_name": "Vault Memory",
+  "version": "0.1.0",
+  "description": "Routes local knowledge-base questions through the ANUBIS vault and memory stack.",
+  "enabled": true,
+  "triggers": [
+    "vault",
+    "memory",
+    "obsidian",
+    "knowledge base",
+    "local notes"
+  ],
+  "skills": [
+    "vault-memory"
+  ],
+  "memory": {
+    "obsidian": [
+      "vault",
+      "state/obsidian_vault"
+    ],
+    "qdrant": [
+      "anubis_vault"
+    ]
+  },
+  "permissions": {
+    "network": false,
+    "filesystem": "project-read"
+  }
+}

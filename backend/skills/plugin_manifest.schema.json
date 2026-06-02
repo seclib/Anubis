@@ -1,0 +1,90 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://anubis.local/schemas/plugin-manifest.schema.json",
+  "title": "Anubis OS Skill Plugin Manifest",
+  "type": "object",
+  "required": ["name", "triggers", "skills"],
+  "additionalProperties": true,
+  "properties": {
+    "name": {
+      "type": "string",
+      "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{1,63}$",
+      "description": "Stable plugin identifier."
+    },
+    "display_name": {
+      "type": "string"
+    },
+    "version": {
+      "type": "string"
+    },
+    "description": {
+      "type": "string"
+    },
+    "enabled": {
+      "type": "boolean",
+      "default": true
+    },
+    "triggers": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Literal trigger phrases or regex strings wrapped in /slashes/."
+    },
+    "skills": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "description": "Markdown files or directories under /skills/ to load as skill context."
+    },
+    "activation_events": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optional VS Code-style activation labels."
+    },
+    "memory": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "obsidian": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "qdrant": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "permissions": {
+      "type": "object",
+      "additionalProperties": true,
+      "properties": {
+        "tools": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "network": {
+          "type": "boolean",
+          "default": false
+        },
+        "filesystem": {
+          "type": "string"
+        }
+      }
+    }
+  }
+}

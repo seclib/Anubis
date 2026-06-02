@@ -9,6 +9,14 @@ htmlcov/
 desktop/node_modules/
 desktop/dist/
 desktop/src-tauri/target/
+desktop-ui/node_modules/
+desktop-ui/dist/
+runtime-tauri/target/
+runtime-tauri/gen/schemas/
+node_modules/
+dist/
+src-tauri/target/
+src-tauri/gen/schemas/
 *.log
 state/runtime.json
 state/vector_store.json

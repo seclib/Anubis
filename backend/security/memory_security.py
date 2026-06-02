@@ -14,6 +14,7 @@ if TYPE_CHECKING:
 
 MemorySource = Literal["obsidian", "qdrant", "user", "system", "unknown"]
 RiskLevel = Literal["low", "medium", "high", "critical"]
+InputKind = Literal["data", "instruction", "mixed", "malicious"]
 
 INJECTION_PATTERNS: tuple[tuple[str, str, float], ...] = (
     ("ignore_previous", r"\b(ignore|forget|discard|override)\b.{0,80}\b(previous|prior|above|system|developer)\b", 0.75),
@@ -109,6 +110,15 @@ class SanitizedInput:
 
 
 @dataclass(frozen=True)
+class InputClassification:
+    kind: InputKind
+    confidence: float
+    instruction_like: bool
+    data_like: bool
+    reasons: tuple[str, ...] = ()
+
+
+@dataclass(frozen=True)
 class SecuredMemory:
     source: MemorySource
     content: str
@@ -123,6 +133,13 @@ class SecuredMemory:
     instruction_like: bool
     contradictions: tuple[str, ...] = ()
     findings: tuple[InjectionFinding, ...] = ()
+
+
+@dataclass(frozen=True)
+class SanitizedMemoryBatch:
+    memories: tuple[SecuredMemory, ...]
+    accepted: tuple[SecuredMemory, ...]
+    rejected: tuple[SecuredMemory, ...]
 
 
 @dataclass(frozen=True)
@@ -144,6 +161,46 @@ class SecurityDecision:
 
 class ToolGuardError(RuntimeError):
     pass
+
+
+@dataclass(frozen=True)
+class SecurityPipelineResult:
+    classification: InputClassification
+    sanitized_input: SanitizedInput
+    memory_batch: SanitizedMemoryBatch
+    context: ContextBundle
+
+    def report(self) -> dict[str, Any]:
+        return {
+            "classification": asdict(self.classification),
+            "sanitized_input": asdict(self.sanitized_input),
+            "memory": {
+                "accepted": [asdict(memory) for memory in self.memory_batch.accepted],
+                "rejected": [asdict(memory) for memory in self.memory_batch.rejected],
+            },
+            "context": security_report(self.context),
+        }
+
+
+def classify_input(text: str) -> InputClassification:
+    cleaned = normalize_text(text)
+    findings = tuple(detect_injection(cleaned))
+    injection_risk = aggregate_injection_risk(findings)
+    instruction_like = is_instruction_like(cleaned)
+    command_like = contains_suspicious_command(cleaned)
+    data_like = bool(key_terms(strip_executable_directives(cleaned)))
+    reasons: list[str] = []
+    if findings:
+        reasons.extend(sorted({finding.kind for finding in findings}))
+    if command_like:
+        reasons.append("command_like")
+    if injection_risk >= 0.75:
+        return InputClassification("malicious", injection_risk, True, data_like, tuple(reasons))
+    if instruction_like and data_like:
+        return InputClassification("mixed", max(0.55, injection_risk), True, True, tuple(reasons))
+    if instruction_like:
+        return InputClassification("instruction", max(0.55, injection_risk), True, False, tuple(reasons))
+    return InputClassification("data", round(1.0 - injection_risk, 6), False, data_like, tuple(reasons))
 
 
 def sanitize_input(text: str) -> SanitizedInput:
@@ -217,7 +274,7 @@ def validate_memory(
         source=source,
         content=content,
         isolated_content=strip_executable_directives(content),
-        metadata=metadata,
+        metadata=safe_metadata(metadata),
         source_trust=source_trust,
         consistency_score=consistency,
         recency_score=recency,
@@ -345,6 +402,22 @@ def build_safe_context(
     return SafeContextBuilder().build(sanitized, secured)
 
 
+def sanitize_memory_inputs(
+    memories: Iterable[Mapping[str, Any]],
+    *,
+    now: datetime | None = None,
+) -> SanitizedMemoryBatch:
+    memory_list = list(memories)
+    secured = tuple(validate_memory(memory, corpus=memory_list, now=now) for memory in memory_list)
+    accepted = tuple(
+        memory
+        for memory in sorted(secured, key=lambda item: item.trust_score, reverse=True)
+        if memory.trust_score >= 0.42 and not memory.instruction_like and memory.injection_risk_score < 0.60
+    )
+    rejected = tuple(memory for memory in secured if memory not in accepted)
+    return SanitizedMemoryBatch(memories=secured, accepted=accepted, rejected=rejected)
+
+
 class ToolGuard:
     def __init__(
         self,
@@ -451,6 +524,33 @@ class MemorySecurityPipeline:
         secured = [validate_memory(memory, corpus=memory_list, now=now) for memory in memory_list]
         return sanitized, self.context_builder.build(sanitized, secured)
 
+    def process(
+        self,
+        user_query: str,
+        memories: Iterable[Mapping[str, Any]],
+        *,
+        now: datetime | None = None,
+    ) -> SecurityPipelineResult:
+        classification = classify_input(user_query)
+        sanitized = sanitize_input(user_query)
+        batch = sanitize_memory_inputs(memories, now=now)
+        context = self.context_builder.build(sanitized, batch.memories)
+        accepted_ids = {id(memory) for memory in context.memories}
+        accepted = tuple(memory for memory in batch.memories if id(memory) in accepted_ids)
+        rejected = tuple(memory for memory in batch.memories if id(memory) not in accepted_ids)
+        batch = SanitizedMemoryBatch(memories=batch.memories, accepted=accepted, rejected=rejected)
+        return SecurityPipelineResult(classification, sanitized, batch, context)
+
+    def validate_tool(
+        self,
+        tool_name: str,
+        args: Mapping[str, Any],
+        *,
+        user_intent: str,
+        context: ContextBundle | None = None,
+    ) -> SecurityDecision:
+        return self.tool_guard.validate(tool_name, args, user_intent=user_intent, context=context)
+
 
 def detect_contradictions(memory: Mapping[str, Any], corpus: Iterable[Mapping[str, Any]]) -> list[str]:
     content = str(memory.get("text") or memory.get("content") or "")
@@ -507,10 +607,14 @@ def contains_suspicious_content(text: str) -> bool:
 
 
 def contains_suspicious_command(text: str) -> bool:
-    lowered = text.lower()
-    if any(term in lowered for term in DANGEROUS_COMMAND_TERMS):
+    if any(pattern.search(text) for pattern in COMMAND_PATTERNS):
         return True
-    return any(pattern.search(text) for pattern in COMMAND_PATTERNS)
+    return bool(
+        re.search(
+            rf"(?im)^\s*(?:{'|'.join(re.escape(term) for term in sorted(DANGEROUS_COMMAND_TERMS))})\b",
+            text,
+        )
+    )
 
 
 def first_command_excerpt(text: str) -> str:
@@ -666,21 +770,31 @@ def security_report(bundle: ContextBundle) -> dict[str, Any]:
     }
 
 
+SecurityPipeline = MemorySecurityPipeline
+
+
 __all__ = [
     "ContextBundle",
+    "InputClassification",
     "InjectionFinding",
+    "InputKind",
     "MemorySecurityPipeline",
     "SafeContextBuilder",
     "SafeToolExecutor",
     "SanitizedInput",
+    "SanitizedMemoryBatch",
     "SecuredMemory",
     "SecurityDecision",
+    "SecurityPipeline",
+    "SecurityPipelineResult",
     "ToolGuard",
     "ToolGuardError",
     "TrustScorer",
     "build_safe_context",
+    "classify_input",
     "detect_injection",
     "sanitize_input",
+    "sanitize_memory_inputs",
     "security_report",
     "validate_memory",
 ]

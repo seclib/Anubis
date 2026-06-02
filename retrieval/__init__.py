@@ -17,13 +17,31 @@ from retrieval.memory_scoring import (
     route_memory,
     score_memories,
 )
+from retrieval.memory_router import (
+    ContextMerger,
+    FusedContextItem,
+    MemoryRouteResult,
+    MemoryRouter,
+    QueryClassification,
+    QueryClassifier,
+    aggregate_route_confidence,
+    route_with_classification,
+    to_candidate,
+)
 
 __all__ = [
     "Conflict",
+    "ContextMerger",
+    "FusedContextItem",
     "MemoryCandidate",
+    "MemoryRouteResult",
+    "MemoryRouter",
     "MemoryRoutingDecision",
+    "QueryClassification",
+    "QueryClassifier",
     "ScoredMemory",
     "aggregate_confidence",
+    "aggregate_route_confidence",
     "apply_conflict_priority",
     "confidence_score",
     "detect_conflicts",
@@ -33,5 +51,7 @@ __all__ = [
     "query_requires_truth",
     "recency_score",
     "route_memory",
+    "route_with_classification",
     "score_memories",
+    "to_candidate",
 ]

@@ -8,8 +8,12 @@ import re
 from typing import Any, Callable, Mapping
 
 
-ALLOWED_ACTIONS = {"SEARCH_MEMORY", "QUERY_QDRANT", "CALL_LLM", "RUN_TOOL", "IF", "RETURN"}
+ALLOWED_ACTIONS = {"SEARCH_MEMORY", "QUERY_QDRANT", "CALL_LLM", "RUN_TOOL", "IF", "THEN", "RETURN"}
 DEFAULT_ALLOWED_TOOLS = {"search_memory", "query_qdrant", "summarize", "classify", "format_report"}
+FORBIDDEN_TOOL_ARG_KEYS = {"code", "command", "shell", "python", "eval", "exec", "subprocess", "__import__"}
+FORBIDDEN_TOOL_ARG_TEXT = re.compile(
+    r"(?i)(rm\s+-rf|sudo|curl\s+.*\|\s*sh|wget\s+.*\|\s*sh|bash\s+-c|sh\s+-c|python\s+-c|eval\(|exec\(|__import__|subprocess)"
+)
 LOGGER = logging.getLogger("anubis.skills.dsl_runtime")
 
 
@@ -95,6 +99,8 @@ class ToolDispatcher:
     def dispatch(self, name: str, args: Mapping[str, Any]) -> Any:
         if name not in self.allowed:
             raise DslRuntimeError(f"tool not whitelisted: {name}")
+        if unsafe_tool_args(args):
+            raise DslRuntimeError("RUN_TOOL arguments contain a forbidden execution surface")
         tool = self.tools.get(name)
         if tool is None:
             raise DslRuntimeError(f"tool not registered: {name}")
@@ -119,6 +125,7 @@ class DslRuntime:
 
     def execute(self, skill: DslSkill | Mapping[str, Any], context: dict[str, Any]) -> SkillResult:
         parsed = parse_skill(skill) if isinstance(skill, Mapping) else skill
+        validate_skill(parsed)
         variables: dict[str, Any] = {"input": dict(context), "query": context.get("query", "")}
         trace: list[StepTrace] = []
         step_index = {step.id: index for index, step in enumerate(parsed.steps)}
@@ -170,8 +177,8 @@ class DslRuntime:
         if action == "IF":
             return {
                 "condition": eval_condition(str(step.input.get("condition", "")), variables),
-                "then_step": resolve(step.input.get("then_step"), variables),
-                "else_step": resolve(step.input.get("else_step"), variables),
+                "then_step": resolve(step.input.get("then_step", step.input.get("then")), variables),
+                "else_step": resolve(step.input.get("else_step", step.input.get("else")), variables),
             }
         data = resolve(step.input, variables)
         if action == "SEARCH_MEMORY":
@@ -188,6 +195,8 @@ class DslRuntime:
             if not isinstance(args, dict):
                 raise DslRuntimeError("RUN_TOOL args must be an object")
             return self.dispatcher.dispatch(str(data.get("name", "")), args)
+        if action == "THEN":
+            return data.get("value", True)
         if action == "RETURN":
             return data.get("value")
         raise DslRuntimeError(f"unsupported action: {action}")
@@ -215,15 +224,19 @@ def parse_skill(raw: Mapping[str, Any]) -> DslSkill:
     steps = raw.get("steps", ())
     if not isinstance(steps, list | tuple):
         raise DslRuntimeError("steps must be a list")
-    return DslSkill(
+    skill = DslSkill(
         name=str(raw.get("name") or "unnamed_skill"),
         trigger=str(raw.get("trigger", "")),
         steps=tuple(parse_step(item) for item in steps),
         fallback=parse_step(raw["fallback"]) if isinstance(raw.get("fallback"), Mapping) else None,
     )
+    validate_skill(skill)
+    return skill
 
 
 def parse_step(raw: Mapping[str, Any]) -> DslStep:
+    if not isinstance(raw, Mapping):
+        raise DslRuntimeError("step must be an object")
     action = str(raw.get("action", "")).upper()
     if action not in ALLOWED_ACTIONS:
         raise DslRuntimeError(f"action not allowed: {action}")
@@ -234,6 +247,37 @@ def parse_step(raw: Mapping[str, Any]) -> DslStep:
         save_as=str(raw.get("save_as") or ""),
         require=str(raw.get("require") or ""),
     )
+
+
+def validate_skill(skill: DslSkill) -> None:
+    if not skill.steps:
+        raise DslRuntimeError("skill requires at least one step")
+    ids = [step.id for step in skill.steps]
+    if any(step_id <= 0 for step_id in ids):
+        raise DslRuntimeError("step ids must be positive integers")
+    if len(set(ids)) != len(ids):
+        raise DslRuntimeError("step ids must be unique")
+    positions = {step.id: index for index, step in enumerate(skill.steps)}
+    for index, step in enumerate(skill.steps):
+        if step.action == "RUN_TOOL":
+            name = str(step.input.get("name", ""))
+            if name and name not in DEFAULT_ALLOWED_TOOLS:
+                # Runtime-level allowed_tools may be narrower or wider, but obvious raw execution names are always rejected.
+                if name.lower() in {"shell", "bash", "python", "python3", "eval", "exec", "subprocess", "run_command"}:
+                    raise DslRuntimeError(f"raw execution tool is forbidden: {name}")
+        if step.action == "IF":
+            for key in ("then_step", "then", "else_step", "else"):
+                value = step.input.get(key)
+                if value in (None, ""):
+                    continue
+                try:
+                    target = int(value)
+                except (TypeError, ValueError) as exc:
+                    raise DslRuntimeError(f"IF {key} must reference a numeric step id") from exc
+                if target not in positions:
+                    raise DslRuntimeError(f"IF {key} references unknown step: {target}")
+                if positions[target] <= index:
+                    raise DslRuntimeError("IF jumps must move forward")
 
 
 def resolve(value: Any, variables: dict[str, Any]) -> Any:
@@ -279,6 +323,21 @@ def eval_condition(condition: str, variables: dict[str, Any]) -> bool:
     return False
 
 
+def unsafe_tool_args(value: Any) -> bool:
+    if isinstance(value, Mapping):
+        for key, item in value.items():
+            if str(key).lower() in FORBIDDEN_TOOL_ARG_KEYS:
+                return True
+            if unsafe_tool_args(item):
+                return True
+        return False
+    if isinstance(value, list):
+        return any(unsafe_tool_args(item) for item in value)
+    if isinstance(value, str):
+        return bool(FORBIDDEN_TOOL_ARG_TEXT.search(value))
+    return False
+
+
 def clean_ref(value: str) -> str:
     return value.strip().removeprefix("${").removesuffix("}")
 
@@ -291,7 +350,14 @@ def stringify(value: Any) -> str:
     return json.dumps(value, ensure_ascii=False, default=str)
 
 
+DslInterpreter = DslRuntime
+SkillExecutionEngine = DslRuntime
+
+
 __all__ = [
+    "ALLOWED_ACTIONS",
+    "DEFAULT_ALLOWED_TOOLS",
+    "DslInterpreter",
     "DslRuntime",
     "DslRuntimeError",
     "DslSkill",
@@ -299,8 +365,10 @@ __all__ = [
     "LlmHandler",
     "MemoryConnector",
     "SkillResult",
+    "SkillExecutionEngine",
     "StepLogger",
     "StepTrace",
     "ToolDispatcher",
     "parse_skill",
+    "validate_skill",
 ]

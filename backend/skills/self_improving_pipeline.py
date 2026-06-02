@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any, Callable, Iterable, Mapping, Protocol
 
 from backend.skills.dsl_runtime import DslSkill, DslStep
+from backend.skills.plugin_manager import PluginManager
 
 
 SAFE_DSL_ACTIONS = {"SEARCH_MEMORY", "QUERY_QDRANT", "CALL_LLM", "RUN_TOOL", "IF", "RETURN"}
@@ -128,6 +129,42 @@ class DeploymentRecord:
     indexed: bool = False
 
 
+@dataclass(frozen=True)
+class FailureAnalysis:
+    signals: tuple[SkillSignal, ...]
+    summary: str
+
+
+@dataclass(frozen=True)
+class SkillGap:
+    name: str
+    summary: str
+    candidate: SkillCandidate
+    evidence: tuple[SkillSignal, ...]
+    score: float
+
+
+@dataclass(frozen=True)
+class GeneratedSkill:
+    document: DslDocument
+    markdown: str
+    manifest: dict[str, Any]
+
+
+@dataclass(frozen=True)
+class SelfImprovementRun:
+    analysis: FailureAnalysis
+    gaps: tuple[SkillGap, ...]
+    generated: tuple[GeneratedSkill, ...]
+    validations: tuple[ValidationResult, ...]
+    critic_decisions: tuple[ValidationResult, ...]
+    deployments: tuple[DeploymentRecord, ...]
+
+    @property
+    def approved(self) -> bool:
+        return any(record.approved for record in self.deployments)
+
+
 @dataclass
 class SkillRegistry:
     skills: dict[str, DslSkill] = field(default_factory=dict)
@@ -158,6 +195,17 @@ class LogSignalAnalyzer:
             if repeated[clean_text(signal.text)] >= 2:
                 signals.append(SkillSignal("repeated_error", signal.text, signal.confidence, signal.source))
         return tuple(signals)
+
+
+class FailureAnalyzer:
+    def __init__(self, analyzer: LogSignalAnalyzer | None = None) -> None:
+        self.analyzer = analyzer or LogSignalAnalyzer()
+
+    def analyze(self, failures: Iterable[Mapping[str, Any]]) -> FailureAnalysis:
+        signals = self.analyzer.analyze(failures)
+        counts = Counter(signal.kind for signal in signals)
+        summary = ", ".join(f"{kind}={count}" for kind, count in sorted(counts.items())) or "no failure signals"
+        return FailureAnalysis(signals=signals, summary=summary)
 
 
 class SkillCandidateExtractor:
@@ -204,6 +252,41 @@ class SkillCandidateExtractor:
         return bool(re.search(r"(?i)(failed|missing|unknown|low confidence|could not|no skill|need .* workflow)", text))
 
 
+class SkillGapDetector:
+    def __init__(self, extractor: SkillCandidateExtractor | None = None) -> None:
+        self.extractor = extractor or SkillCandidateExtractor()
+
+    def detect(
+        self,
+        analysis: FailureAnalysis,
+        *,
+        minimum_count: int = 2,
+        existing_names: Iterable[str] = (),
+    ) -> tuple[SkillGap, ...]:
+        candidates = SkillNormalizer().normalize(
+            self.extractor.from_signals(analysis.signals, minimum_count=minimum_count),
+            existing_names,
+        )
+        gaps: list[SkillGap] = []
+        for candidate in candidates:
+            candidate_terms = set(keywords(" ".join((candidate.name, candidate.trigger))))
+            evidence = tuple(
+                signal
+                for signal in analysis.signals
+                if jaccard(candidate_terms, set(keywords(signal.text))) > 0
+            )
+            gaps.append(
+                SkillGap(
+                    name=candidate.name,
+                    summary=f"Missing reusable skill for {candidate.name.replace('_', ' ')}",
+                    candidate=candidate,
+                    evidence=evidence,
+                    score=candidate.confidence,
+                )
+            )
+        return tuple(gaps)
+
+
 class SkillNormalizer:
     def normalize(self, candidates: list[SkillCandidate], existing_names: Iterable[str] = ()) -> list[SkillCandidate]:
         accepted: list[SkillCandidate] = []
@@ -245,6 +328,32 @@ class DslCompiler:
     def _prompt(self, candidate: SkillCandidate) -> str:
         procedure = " ".join(candidate.procedure)
         return f"Use only retrieved memory and Qdrant patterns. Skill procedure: {procedure}"
+
+
+class ObsidianSkillGenerator:
+    def __init__(self, compiler: DslCompiler | None = None) -> None:
+        self.compiler = compiler or DslCompiler()
+
+    def generate(self, gap: SkillGap) -> GeneratedSkill:
+        document = self.compiler.compile(gap.candidate)
+        manifest = {
+            "name": document.name,
+            "enabled": True,
+            "triggers": [document.trigger, document.name.replace("_", " "), gap.summary],
+            "skills": [document.name],
+            "memory": {
+                "obsidian": [f"skills/{document.name}"],
+                "qdrant": [document.name, "known_patterns"],
+            },
+            "permissions": {"tools": [], "network": False, "filesystem": "plugin-scope-only"},
+            "generated": {
+                "created_at": datetime.now(UTC).isoformat(),
+                "source": "self_improving_system",
+                "gap_score": gap.score,
+                "evidence_count": len(gap.evidence),
+            },
+        }
+        return GeneratedSkill(document=document, markdown=document.markdown(), manifest=manifest)
 
 
 class SkillDslValidator:
@@ -292,6 +401,52 @@ class SkillCritic:
             reasons.append("skill lacks synthesis step")
         score = round(max(0.0, validation.score - 0.18 * len(reasons)), 3)
         return ValidationResult(score >= 0.82 and not reasons, score, tuple(reasons))
+
+
+class SkillValidationSystem:
+    def __init__(
+        self,
+        validator: SkillDslValidator | None = None,
+        critic: SkillCritic | None = None,
+    ) -> None:
+        self.validator = validator or SkillDslValidator()
+        self.critic = critic or SkillCritic()
+
+    def validate(
+        self,
+        gap: SkillGap,
+        generated: GeneratedSkill,
+        *,
+        existing: Iterable[str] = (),
+    ) -> tuple[ValidationResult, ValidationResult]:
+        validation = self.validator.validate(generated.document, existing)
+        decision = self.critic.review(gap.candidate, generated.document, validation)
+        return validation, decision
+
+
+class PluginRegistrar:
+    def __init__(
+        self,
+        deployer: SkillDeployer,
+        manager: PluginManager | None = None,
+    ) -> None:
+        self.deployer = deployer
+        self.manager = manager or PluginManager(root=deployer.plugin_root)
+
+    def register(self, generated: GeneratedSkill, critic_decision: ValidationResult) -> DeploymentRecord:
+        if not critic_decision.approved:
+            return DeploymentRecord(
+                generated.document.name,
+                "",
+                False,
+                critic_decision.score,
+                tuple(filter(None, generated.document.source_path.split(","))),
+            )
+        record = self.deployer.deploy(generated.document, critic_decision)
+        if record.approved:
+            self.manager.discover()
+            self.manager.enable(generated.document.name)
+        return record
 
 
 class SkillDeployer:
@@ -425,6 +580,64 @@ class SelfImprovingSkillPipeline:
         if skill is None:
             raise KeyError(f"skill not registered: {name}")
         return skill
+
+
+class SelfImprovingSystem:
+    """Five-stage self-improvement pipeline for safe skill generation."""
+
+    def __init__(
+        self,
+        *,
+        analyzer: FailureAnalyzer | None = None,
+        gap_detector: SkillGapDetector | None = None,
+        generator: ObsidianSkillGenerator | None = None,
+        validation: SkillValidationSystem | None = None,
+        deployer: SkillDeployer | None = None,
+        registrar: PluginRegistrar | None = None,
+    ) -> None:
+        self.analyzer = analyzer or FailureAnalyzer()
+        self.gap_detector = gap_detector or SkillGapDetector()
+        self.generator = generator or ObsidianSkillGenerator()
+        self.validation = validation or SkillValidationSystem()
+        self.deployer = deployer or SkillDeployer()
+        self.registrar = registrar or PluginRegistrar(self.deployer)
+
+    def improve(
+        self,
+        failures: Iterable[Mapping[str, Any]],
+        *,
+        minimum_count: int = 2,
+    ) -> SelfImprovementRun:
+        analysis = self.analyzer.analyze(failures)
+        existing = self.deployer.registry.names()
+        gaps = self.gap_detector.detect(analysis, minimum_count=minimum_count, existing_names=existing)
+        generated: list[GeneratedSkill] = []
+        validations: list[ValidationResult] = []
+        decisions: list[ValidationResult] = []
+        deployments: list[DeploymentRecord] = []
+
+        for gap in gaps:
+            skill = self.generator.generate(gap)
+            validation, decision = self.validation.validate(gap, skill, existing=existing)
+            generated.append(skill)
+            validations.append(validation)
+            decisions.append(decision)
+            if decision.approved:
+                record = self.registrar.register(skill, decision)
+            else:
+                record = DeploymentRecord(skill.document.name, "", False, decision.score, gap.candidate.sources)
+            deployments.append(record)
+            if record.approved:
+                existing.append(record.name)
+
+        return SelfImprovementRun(
+            analysis=analysis,
+            gaps=gaps,
+            generated=tuple(generated),
+            validations=tuple(validations),
+            critic_decisions=tuple(decisions),
+            deployments=tuple(deployments),
+        )
 
 
 def clean_text(text: str) -> str:

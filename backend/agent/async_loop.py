@@ -26,8 +26,8 @@ class AsyncAgentLoop:
         history: list[dict[str, Any]] = []
         for round_index in range(1, self.max_rounds + 1):
             plan = await asyncio.to_thread(self.planner.plan, task, feedback)
-            results = await asyncio.to_thread(self.executor.execute, plan)
-            critique = await asyncio.to_thread(self.critic.critique, task, plan, results)
+            executor_output = await asyncio.to_thread(self.executor.execute, plan)
+            critique = await asyncio.to_thread(self.critic.critique, task, plan, executor_output)
             history.append(
                 {
                     "round": round_index,
@@ -36,7 +36,7 @@ class AsyncAgentLoop:
                         "context": plan.context,
                         "steps": [asdict(step) for step in plan.steps],
                     },
-                    "results": [asdict(result) for result in results],
+                    "executor_output": asdict(executor_output),
                     "critique": asdict(critique),
                 }
             )
@@ -86,11 +86,11 @@ class AsyncAgentLoop:
 
     def _answer(self, history: list[dict[str, Any]]) -> str:
         last = history[-1]
-        results = last.get("results", [])
-        if not results:
+        executor_output = last.get("executor_output", {})
+        draft = str(executor_output.get("draft_response") or "")
+        if not draft:
             return "No execution results."
-        outputs = [json.dumps(item.get("output"), ensure_ascii=False, default=str) for item in results]
-        return "\n".join(outputs)
+        return draft
 
     def _context_lines(self, history: list[dict[str, Any]]) -> str:
         paths = []
@@ -104,7 +104,8 @@ class AsyncAgentLoop:
     def _actions(self, history: list[dict[str, Any]]) -> list[dict[str, Any]]:
         actions = []
         for round_item in history:
-            for result in round_item.get("results", []):
+            executor_output = round_item.get("executor_output", {})
+            for result in executor_output.get("step_results", []):
                 step = result.get("step", {})
                 if step.get("tool"):
                     actions.append({"tool": step.get("tool"), "args": step.get("args", {}), "ok": result.get("ok")})

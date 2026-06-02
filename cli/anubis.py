@@ -1,27 +1,104 @@
 from __future__ import annotations
 
 import argparse
+import asyncio
 import json
 import os
 import readline
+import re
 import sys
 import textwrap
 import time
 from dataclasses import asdict, dataclass, field
 from datetime import UTC, datetime
 from pathlib import Path
+from types import SimpleNamespace
 from typing import Any, Iterable
+from urllib.error import URLError
+from urllib.request import Request, urlopen
 
-import requests
 
-from backend.agent.llm import OllamaLLM
-from backend.core.config import settings
-from backend.rag.indexer import RagIndexer
-from backend.rag.retriever import RagRetriever
-from backend.skills.parser import Skill, SkillRepository
-from backend.tools.sandbox import SandboxExecutor, ToolRequest
-from backend.vault.service import VaultService
-from retrieval.memory_scoring import MemoryCandidate, route_memory
+def _load_settings() -> Any:
+    try:
+        from backend.core.config import settings as backend_settings
+
+        return backend_settings
+    except Exception:
+        return SimpleNamespace(
+            vault_path=Path(os.getenv("ANUBIS_VAULT_PATH", "vault")),
+            skills_path=Path(os.getenv("ANUBIS_SKILLS_PATH", "vault/skills")),
+            project_root=Path(os.getenv("PROJECT_ROOT", ".")),
+            qdrant_url=os.getenv("QDRANT_URL", "http://localhost:6333"),
+            qdrant_collection=os.getenv("QDRANT_COLLECTION", "anubis_chunks"),
+            llm_model=os.getenv("ANUBIS_LLM_MODEL", "qwen2.5-coder:7b"),
+            ollama_url=os.getenv("OLLAMA_BASE_URL", "http://localhost:11434"),
+            tool_timeout_seconds=int(os.getenv("ANUBIS_TOOL_TIMEOUT_SECONDS", "30")),
+        )
+
+
+settings = _load_settings()
+
+
+class _UnavailableService:
+    def __init__(self, *_args: Any, **_kwargs: Any) -> None:
+        pass
+
+    def search(self, *_args: Any, **_kwargs: Any) -> list[Any]:
+        return []
+
+    def reindex_all(self) -> int:
+        return 0
+
+    def index_note(self, *_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    def list_notes(self) -> list[dict[str, Any]]:
+        return []
+
+    def read_note(self, path: str) -> str:
+        raise FileNotFoundError(path)
+
+    def write_note(self, path: str, content: str) -> None:
+        output = Path(settings.vault_path) / path
+        output.parent.mkdir(parents=True, exist_ok=True)
+        output.write_text(content, encoding="utf-8")
+
+    def execute(self, _request: Any) -> Any:
+        return SimpleNamespace(ok=False, output="sandbox unavailable")
+
+
+class _ToolRequest:
+    def __init__(
+        self,
+        *,
+        command: str,
+        justification: str,
+        cwd: str,
+        allow_network: bool,
+    ) -> None:
+        self.command = command
+        self.justification = justification
+        self.cwd = cwd
+        self.allow_network = allow_network
+
+
+def _load_runtime_dependencies() -> tuple[Any, Any, Any, Any, Any]:
+    try:
+        from backend.rag.indexer import RagIndexer
+        from backend.rag.retriever import RagRetriever
+        from backend.skills.parser import SkillRepository
+        from backend.tools.sandbox import SandboxExecutor, ToolRequest
+        from backend.vault.service import VaultService
+
+        return RagRetriever, RagIndexer, SkillRepository, VaultService, (SandboxExecutor, ToolRequest)
+    except Exception:
+        return (
+            _UnavailableService,
+            _UnavailableService,
+            _UnavailableService,
+            _UnavailableService,
+            (_UnavailableService, _ToolRequest),
+        )
 
 
 HISTORY_FILE = Path("state/anubis_cli_history")
@@ -87,10 +164,19 @@ class StreamingOllama:
         self.model = model or settings.llm_model
         self.base_url = (base_url or settings.ollama_url).rstrip("/")
         self.timeout = timeout
-        self.fallback = OllamaLLM(model=self.model, base_url=self.base_url, timeout=timeout)
 
     def generate(self, prompt: str) -> str:
-        return self.fallback.generate(prompt)
+        payload = {
+            "model": self.model,
+            "messages": [{"role": "user", "content": prompt}],
+            "stream": False,
+            "options": {"temperature": 0.2},
+        }
+        try:
+            data = self._post_json("/api/chat", payload)
+        except (OSError, URLError, TimeoutError, json.JSONDecodeError) as exc:
+            return f"[LLM ERROR] {exc}"
+        return str(data.get("message", {}).get("content") or data.get("response") or "").strip()
 
     def stream(self, prompt: str) -> Iterable[str]:
         payload = {
@@ -100,14 +186,16 @@ class StreamingOllama:
             "options": {"temperature": 0.2},
         }
         try:
-            with requests.post(
+            body = json.dumps(payload).encode("utf-8")
+            request = Request(
                 f"{self.base_url}/api/chat",
-                json=payload,
-                timeout=self.timeout,
-                stream=True,
-            ) as response:
-                response.raise_for_status()
-                for line in response.iter_lines(decode_unicode=True):
+                data=body,
+                headers={"Content-Type": "application/json"},
+                method="POST",
+            )
+            with urlopen(request, timeout=self.timeout) as response:
+                for raw_line in response:
+                    line = raw_line.decode("utf-8").strip()
                     if not line:
                         continue
                     data = json.loads(line)
@@ -120,6 +208,17 @@ class StreamingOllama:
             text = self.generate(prompt)
             if text:
                 yield text
+
+    def _post_json(self, path: str, payload: dict[str, Any]) -> dict[str, Any]:
+        body = json.dumps(payload).encode("utf-8")
+        request = Request(
+            f"{self.base_url}{path}",
+            data=body,
+            headers={"Content-Type": "application/json"},
+            method="POST",
+        )
+        with urlopen(request, timeout=self.timeout) as response:
+            return json.loads(response.read().decode("utf-8"))
 
 
 class AnubisAgent:
@@ -135,6 +234,8 @@ class AnubisAgent:
         self.max_rounds = max_rounds
         self.terminal = terminal or Terminal()
         self.llm = llm or StreamingOllama()
+        RagRetriever, RagIndexer, SkillRepository, VaultService, sandbox_dependencies = _load_runtime_dependencies()
+        SandboxExecutor, self._tool_request_type = sandbox_dependencies
         self.retriever = RagRetriever()
         self.indexer = RagIndexer()
         self.skills = SkillRepository()
@@ -209,12 +310,17 @@ class AnubisAgent:
         qdrant_results: list[dict[str, Any]],
         obsidian_results: list[dict[str, Any]],
     ) -> list[dict[str, Any]]:
+        try:
+            from retrieval.memory_scoring import MemoryCandidate, route_memory
+        except Exception:
+            return self.merge_context(qdrant_results, obsidian_results)
+
         qdrant_candidates = [
-            self._memory_candidate(item, source="qdrant")
+            self._memory_candidate(item, source="qdrant", memory_candidate_type=MemoryCandidate)
             for item in qdrant_results
         ]
         obsidian_candidates = [
-            self._memory_candidate(item, source="obsidian")
+            self._memory_candidate(item, source="obsidian", memory_candidate_type=MemoryCandidate)
             for item in obsidian_results
         ]
         decision = route_memory(
@@ -344,14 +450,15 @@ class AnubisAgent:
                 if not self.allow_tools:
                     results.append(StepResult(step, False, "shell tools are disabled"))
                     continue
-                request = ToolRequest(
+                request = self._tool_request_type(
                     command=str(step.args.get("command", "")),
                     justification=str(step.args.get("justification", step.goal)),
                     cwd=str(step.args.get("cwd", ".")),
                     allow_network=bool(step.args.get("allow_network", False)),
                 )
                 result = self.sandbox.execute(request)
-                results.append(StepResult(step, result.ok, asdict(result)))
+                output = asdict(result) if hasattr(result, "__dataclass_fields__") else vars(result)
+                results.append(StepResult(step, bool(getattr(result, "ok", False)), output))
                 continue
             results.append(StepResult(step, True, {"status": "ready", "goal": step.goal}))
         return results
@@ -483,14 +590,14 @@ class AnubisAgent:
             "hash": item.get("hash"),
         }
 
-    def _memory_candidate(self, item: dict[str, Any], *, source: str) -> MemoryCandidate:
+    def _memory_candidate(self, item: dict[str, Any], *, source: str, memory_candidate_type: Any) -> Any:
         normalized = self._normalize_memory_item(item, source=source)
         text = str(normalized.get("text") or "")
         path = str(normalized.get("path") or "")
         heading = str(normalized.get("heading") or Path(path).stem or "Memory")
         score = float(normalized.get("score") or 0.0)
         terms = tuple(sorted(self._terms(" ".join([path, heading, text]))))
-        return MemoryCandidate(
+        return memory_candidate_type(
             source="qdrant" if source == "qdrant" else "obsidian",
             content=text,
             qdrant_similarity=score if source == "qdrant" else 0.0,
@@ -617,7 +724,7 @@ class AnubisCLI:
         self.agent = AnubisAgent(allow_tools=allow_tools, terminal=self.terminal)
         self.allow_tools = allow_tools
 
-    def repl(self) -> None:
+    async def repl(self) -> None:
         self._setup_history()
         self._banner()
         while True:
@@ -633,11 +740,36 @@ class AnubisCLI:
                     break
                 continue
             self.terminal.line("\033[36mAnubis:\033[0m")
-            self.agent.ask(user_input, stream=True)
+            await self.run(user_input, stream=True)
 
-    def once(self, task: str) -> None:
+    async def run(self, task: str, *, stream: bool = True) -> dict[str, Any]:
+        if not task.strip():
+            raise ValueError("task cannot be empty")
         self.terminal.line("\033[36mAnubis:\033[0m")
-        self.agent.ask(task, stream=True)
+        return await asyncio.to_thread(self.agent.ask, task, stream=stream)
+
+    async def orchestrate(self, task: str, *, stream: bool = True) -> dict[str, Any]:
+        if not task.strip():
+            raise ValueError("task cannot be empty")
+        from runtime import AnubisOrchestrationEngine, event_to_dict
+
+        self.terminal.line("\033[36mAnubis:\033[0m")
+        engine = AnubisOrchestrationEngine()
+        if not stream:
+            result = await engine.run(task, stream=False)
+            return {
+                "answer": result.answer,
+                "accepted": result.accepted,
+                "events": [event_to_dict(event) for event in result.events],
+            }
+
+        async for event in engine.stream(task):
+            if event.kind == "token":
+                self.terminal.token(event.message + " ")
+            elif event.stage != "output":
+                self.terminal.status(f"{event.stage}: {event.message}")
+        self.terminal.line("\n")
+        return {"answer": "", "accepted": True, "events": []}
 
     def command(self, raw: str) -> bool:
         command, _, args = raw.partition(" ")
@@ -722,37 +854,76 @@ class AnubisCLI:
 
 def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(prog="anubis", description="Terminal-first Anubis AI agent")
-    parser.add_argument("task", nargs="*", help="single-shot question or task")
     parser.add_argument("--tools", action="store_true", help="allow sandboxed tool execution")
-    parser.add_argument("--sync", action="store_true", help="sync Obsidian vault into Qdrant and exit")
-    parser.add_argument("--no-stream", action="store_true", help="disable token streaming")
     parser.add_argument("--debug", action="store_true", help="show retrieval, planner, executor, and critic status")
+    parser.add_argument("--no-stream", action="store_true", help="disable token streaming")
+
+    subcommands = parser.add_subparsers(dest="command")
+
+    run = subcommands.add_parser("run", help='run a single query, for example: anubis run "explain this repo"')
+    run.add_argument("query", nargs="+", help="question or task for Anubis")
+    run.add_argument("--no-stream", dest="run_no_stream", action="store_true", help="disable token streaming for this run")
+    run.add_argument("--tools", dest="run_tools", action="store_true", help="allow sandboxed tool execution for this run")
+    run.add_argument("--debug", dest="run_debug", action="store_true", help="show runtime status for this run")
+
+    subcommands.add_parser("repl", help="start the interactive terminal loop")
+    orchestrate = subcommands.add_parser("orchestrate", help="run the full Anubis OS orchestration engine")
+    orchestrate.add_argument("query", nargs="+", help="question or task for Anubis")
+    orchestrate.add_argument("--no-stream", dest="orchestrate_no_stream", action="store_true", help="disable token streaming for this orchestration run")
+    orchestrate.add_argument("--debug", dest="orchestrate_debug", action="store_true", help="show orchestration stages")
+    subcommands.add_parser("sync", help="sync Obsidian vault into Qdrant and exit")
+    subcommands.add_parser("status", help="print runtime configuration and exit")
+
+    parser.add_argument("task", nargs="*", help=argparse.SUPPRESS)
     return parser
 
 
-def main(argv: list[str] | None = None) -> None:
+async def async_main(argv: list[str] | None = None) -> int:
     args = build_parser().parse_args(argv)
-    cli = AnubisCLI(allow_tools=args.tools, debug=args.debug)
-    if args.sync:
-        count = cli.agent.sync()
+
+    command = args.command
+    tools = bool(getattr(args, "tools", False) or getattr(args, "run_tools", False))
+    debug = bool(getattr(args, "debug", False) or getattr(args, "run_debug", False) or getattr(args, "orchestrate_debug", False))
+    no_stream = bool(getattr(args, "no_stream", False) or getattr(args, "run_no_stream", False) or getattr(args, "orchestrate_no_stream", False))
+    cli = AnubisCLI(allow_tools=tools, debug=debug)
+
+    if command == "sync":
+        count = await asyncio.to_thread(cli.agent.sync)
         print(f"indexed {count} chunks")
-        return
-    if args.task:
-        task_parts = args.task[1:] if args.task[0] == "run" else args.task
-        if args.task[0] == "run" and not task_parts:
-            cli.repl()
-            return
-        task = " ".join(task_parts)
-        if not task:
-            cli.repl()
-            return
-        if args.no_stream:
-            result = cli.agent.ask(task, stream=False)
+        return 0
+
+    if command == "status":
+        cli.command("/status")
+        return 0
+
+    if command == "run":
+        result = await cli.run(" ".join(args.query), stream=not no_stream)
+        if no_stream:
             print(result["answer"])
-            return
-        cli.once(task)
-        return
-    cli.repl()
+        return 0
+
+    if command == "orchestrate":
+        result = await cli.orchestrate(" ".join(args.query), stream=not no_stream)
+        if no_stream:
+            print(result["answer"])
+        return 0
+
+    if command == "repl":
+        await cli.repl()
+        return 0
+
+    if args.task:
+        result = await cli.run(" ".join(args.task), stream=not no_stream)
+        if no_stream:
+            print(result["answer"])
+        return 0
+
+    await cli.repl()
+    return 0
+
+
+def main(argv: list[str] | None = None) -> None:
+    raise SystemExit(asyncio.run(async_main(argv)))
 
 
 if __name__ == "__main__":
