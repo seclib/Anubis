@@ -21,6 +21,7 @@ from backend.rag.retriever import RagRetriever
 from backend.skills.parser import Skill, SkillRepository
 from backend.tools.sandbox import SandboxExecutor, ToolRequest
 from backend.vault.service import VaultService
+from retrieval.memory_scoring import MemoryCandidate, route_memory
 
 
 HISTORY_FILE = Path("state/anubis_cli_history")
@@ -62,15 +63,16 @@ class Critique:
 
 
 class Terminal:
-    def __init__(self, quiet: bool = False) -> None:
+    def __init__(self, quiet: bool = False, debug: bool = False) -> None:
         self.quiet = quiet
+        self.debug = debug
 
     def line(self, text: str = "") -> None:
         if not self.quiet:
             print(text)
 
     def status(self, text: str) -> None:
-        if not self.quiet:
+        if self.debug and not self.quiet:
             print(f"\033[2m{text}\033[0m")
 
     def error(self, text: str) -> None:
@@ -156,10 +158,9 @@ class AnubisAgent:
             self.terminal.status("executor: running planned steps")
             results = self.execute(plan)
 
+            final_answer = self.answer(task, plan, results, stream=False)
             self.terminal.status("critic: validating answer")
-            critique = self.critique(task, plan, results)
-
-            final_answer = self.answer(task, plan, results, stream=stream)
+            critique = self.critique(task, plan, results, final_answer)
             history.append(
                 {
                     "round": round_index,
@@ -175,6 +176,13 @@ class AnubisAgent:
             feedback = critique.reason
             self.terminal.status(f"critic: retrying because {feedback}")
 
+        if history and not history[-1]["critique"]["accepted"]:
+            final_answer = f"I could not validate a grounded answer from retrieved memory. {history[-1]['critique']['reason']}"
+            history[-1]["answer"] = final_answer
+
+        if stream and final_answer:
+            self.stream_text(final_answer)
+
         trace_path = self.store_trace(task, history, started)
         return {
             "task": task,
@@ -188,11 +196,46 @@ class AnubisAgent:
         return self.retrieve_context(task)
 
     def retrieve_context(self, task: str) -> list[dict[str, Any]]:
+        self.terminal.status("memory: querying Qdrant")
         qdrant_results = self.retrieve_qdrant(task)
-        obsidian_results: list[dict[str, Any]] = []
-        if self._needs_obsidian_fallback(qdrant_results):
-            self.terminal.status("memory: Qdrant context insufficient; searching Obsidian fallback")
-            obsidian_results = self.search_obsidian(task)
+        self.terminal.status("memory: querying Obsidian")
+        obsidian_results = self.search_obsidian(task)
+        self.terminal.status("memory: scoring sources")
+        return self.score_and_route_context(task, qdrant_results, obsidian_results)
+
+    def score_and_route_context(
+        self,
+        task: str,
+        qdrant_results: list[dict[str, Any]],
+        obsidian_results: list[dict[str, Any]],
+    ) -> list[dict[str, Any]]:
+        qdrant_candidates = [
+            self._memory_candidate(item, source="qdrant")
+            for item in qdrant_results
+        ]
+        obsidian_candidates = [
+            self._memory_candidate(item, source="obsidian")
+            for item in obsidian_results
+        ]
+        decision = route_memory(
+            query=task,
+            qdrant_candidates=qdrant_candidates,
+            obsidian_candidates=obsidian_candidates,
+            context_limit=MAX_CONTEXT_CHUNKS,
+        )
+        self.terminal.status(
+            "memory: "
+            f"{decision.selected_memory_source} "
+            f"confidence={decision.confidence_score:.2f} "
+            f"conflict={decision.conflict_flag}"
+        )
+        routed = [
+            candidate.metadata["memory_item"]
+            for candidate in decision.retrieved_context
+            if isinstance(candidate.metadata.get("memory_item"), dict)
+        ]
+        if routed:
+            return routed[:MAX_CONTEXT_CHUNKS]
         return self.merge_context(qdrant_results, obsidian_results)
 
     def retrieve_qdrant(self, task: str) -> list[dict[str, Any]]:
@@ -313,16 +356,22 @@ class AnubisAgent:
             results.append(StepResult(step, True, {"status": "ready", "goal": step.goal}))
         return results
 
-    def critique(self, task: str, plan: AgentPlan, results: list[StepResult]) -> Critique:
+    def critique(self, task: str, plan: AgentPlan, results: list[StepResult], answer: str) -> Critique:
         if not plan.memory:
             return Critique(False, False, "Qdrant and Obsidian retrieval produced no relevant context")
         failed = [result for result in results if not result.ok]
         if failed:
             return Critique(False, self.allow_tools, f"{len(failed)} step(s) failed")
+        if not answer.strip():
+            return Critique(False, True, "answer was empty")
         prompt = {
             "role": "critic",
-            "instruction": "Validate whether the agent has enough context and successful steps to answer.",
+            "instruction": (
+                "Validate the answer grounding. Accept only if factual claims are supported by retrieved memory, "
+                "Obsidian truth is not overridden, Qdrant is used only as semantic support, and the answer addresses the task."
+            ),
             "task": task,
+            "answer": answer,
             "plan": self._plan_dict(plan),
             "results": [self._result_dict(result) for result in results],
             "output_json": {"accepted": True, "retry": False, "reason": "short reason"},
@@ -350,6 +399,11 @@ class AnubisAgent:
             chunks.append(answer or self._fallback_answer(task, plan))
         answer = "".join(chunks).strip()
         return answer or self._fallback_answer(task, plan)
+
+    def stream_text(self, text: str) -> None:
+        for token in re.findall(r"\S+\s*", text):
+            self.terminal.token(token)
+        self.terminal.line("\n")
 
     def store_trace(self, task: str, history: list[dict[str, Any]], started: float) -> str:
         timestamp = datetime.now(UTC).strftime("%Y%m%d-%H%M%S")
@@ -389,7 +443,7 @@ class AnubisAgent:
                 "role": "anubis_cli",
                 "instruction": (
                     "Answer as a concise terminal AI agent using ONLY the retrieved memory and skills below. "
-                    "Qdrant memory is primary. Obsidian fallback memory is secondary. "
+                    "Obsidian is the truth layer. Qdrant is the semantic expansion layer. "
                     "Do not rely on general LLM knowledge unless the retrieved context is insufficient; "
                     "if insufficient, say what is missing instead of guessing. Cite note paths when useful."
                 ),
@@ -428,6 +482,25 @@ class AnubisAgent:
             "score": float(item.get("score") or 0),
             "hash": item.get("hash"),
         }
+
+    def _memory_candidate(self, item: dict[str, Any], *, source: str) -> MemoryCandidate:
+        normalized = self._normalize_memory_item(item, source=source)
+        text = str(normalized.get("text") or "")
+        path = str(normalized.get("path") or "")
+        heading = str(normalized.get("heading") or Path(path).stem or "Memory")
+        score = float(normalized.get("score") or 0.0)
+        terms = tuple(sorted(self._terms(" ".join([path, heading, text]))))
+        return MemoryCandidate(
+            source="qdrant" if source == "qdrant" else "obsidian",
+            content=text,
+            qdrant_similarity=score if source == "qdrant" else 0.0,
+            title=heading,
+            tags=tuple(term for term in terms if term in {"skill", "memory", "truth", "workflow", "procedure"}),
+            skills=terms if "skill" in str(normalized.get("source") or "") else (),
+            keywords=terms,
+            confidence=min(1.0, max(score, 0.65 if source == "obsidian" else 0.0)),
+            metadata={"memory_item": normalized},
+        )
 
     def _terms(self, query: str) -> set[str]:
         stopwords = {
@@ -539,8 +612,8 @@ class AnubisAgent:
 
 
 class AnubisCLI:
-    def __init__(self, *, allow_tools: bool = False, quiet: bool = False) -> None:
-        self.terminal = Terminal(quiet=quiet)
+    def __init__(self, *, allow_tools: bool = False, quiet: bool = False, debug: bool = False) -> None:
+        self.terminal = Terminal(quiet=quiet, debug=debug)
         self.agent = AnubisAgent(allow_tools=allow_tools, terminal=self.terminal)
         self.allow_tools = allow_tools
 
@@ -653,21 +726,26 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--tools", action="store_true", help="allow sandboxed tool execution")
     parser.add_argument("--sync", action="store_true", help="sync Obsidian vault into Qdrant and exit")
     parser.add_argument("--no-stream", action="store_true", help="disable token streaming")
+    parser.add_argument("--debug", action="store_true", help="show retrieval, planner, executor, and critic status")
     return parser
 
 
 def main(argv: list[str] | None = None) -> None:
     args = build_parser().parse_args(argv)
-    cli = AnubisCLI(allow_tools=args.tools)
+    cli = AnubisCLI(allow_tools=args.tools, debug=args.debug)
     if args.sync:
         count = cli.agent.sync()
         print(f"indexed {count} chunks")
         return
     if args.task:
         task_parts = args.task[1:] if args.task[0] == "run" else args.task
+        if args.task[0] == "run" and not task_parts:
+            cli.repl()
+            return
         task = " ".join(task_parts)
         if not task:
-            raise SystemExit('usage: anubis run "<query>"')
+            cli.repl()
+            return
         if args.no_stream:
             result = cli.agent.ask(task, stream=False)
             print(result["answer"])
