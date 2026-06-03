@@ -22,6 +22,13 @@ class SandboxRunner(Protocol):
         ...
 
 
+@dataclass(frozen=True)
+class Intent:
+    label: str
+    confidence: float
+    requires_tools: bool = False
+
+
 class NullLLM:
     def generate(self, prompt: str) -> str:
         return ""
@@ -113,6 +120,7 @@ class Step:
 @dataclass(frozen=True)
 class Plan:
     task: str
+    intent: Intent
     context: list[dict[str, Any]]
     steps: list[Step]
 
@@ -142,6 +150,27 @@ class Critique:
     grounding_score: float = 0.0
 
 
+class IntentClassifier:
+    KEYWORDS = {
+        "implementation": ("build", "code", "create", "edit", "fix", "implement", "refactor"),
+        "debugging": ("bug", "error", "fail", "regression", "test", "traceback"),
+        "research": ("explain", "find", "summarize", "what", "why"),
+        "security": ("attack", "audit", "inject", "malware", "policy", "sandbox", "security", "threat"),
+        "memory": ("memory", "note", "obsidian", "qdrant", "recall", "retrieve"),
+    }
+
+    def classify(self, query: str) -> Intent:
+        text = query.lower()
+        scores = {
+            label: sum(1 for keyword in keywords if keyword in text)
+            for label, keywords in self.KEYWORDS.items()
+        }
+        label, score = max(scores.items(), key=lambda item: item[1])
+        if score <= 0:
+            return Intent("general", 0.35, False)
+        return Intent(label, min(1.0, 0.45 + score * 0.15), label in {"implementation", "debugging", "security"})
+
+
 def _json_from_llm(text: str) -> dict[str, Any]:
     text = text.strip()
     if text.startswith("```"):
@@ -163,16 +192,20 @@ class Planner:
         self.llm = llm or _default_llm()
         self.tools = tools or _default_tools()
 
-    def plan(self, task: str, feedback: str = "") -> Plan:
-        context = self._retrieve_context(task, feedback)
+    def plan(self, task: str, feedback: str = "", intent: Intent | None = None) -> Plan:
+        intent = intent or IntentClassifier().classify(task)
+        context = self._retrieve_context(task, feedback, intent)
         prompt = {
             "role": "planner",
             "rules": [
                 "Return JSON only.",
+                "Retrieval has already happened; never plan from memory-free assumptions.",
                 "Decompose the task before any answer is attempted.",
                 "Every step must be executable and grounded in retrieved_context.",
+                "Treat Obsidian entries as the truth layer and Qdrant entries as recall hints.",
             ],
             "task": task,
+            "intent": asdict(intent),
             "feedback": feedback,
             "retrieved_context": context,
             "output_contract": {
@@ -185,16 +218,18 @@ class Planner:
         steps = self._steps(payload.get("steps"))
         if not steps:
             steps = [
-                Step(id=1, goal="Inspect retrieved context for facts relevant to the task"),
-                Step(id=2, goal="Draft a response using only inspected context"),
+                Step(id=1, goal="Inspect Obsidian truth notes and relevant recall chunks"),
+                Step(id=2, goal="Draft a response using only retrieved evidence"),
                 Step(id=3, goal="List citations for every factual claim"),
             ]
-        return Plan(task=task, context=context, steps=steps)
+        return Plan(task=task, intent=intent, context=context, steps=steps)
 
-    def _retrieve_context(self, task: str, feedback: str) -> list[dict[str, Any]]:
+    def _retrieve_context(self, task: str, feedback: str, intent: Intent) -> list[dict[str, Any]]:
         query = f"{task}\n{feedback}".strip() if feedback else task
+        if intent.label not in {"general", "research"}:
+            query = f"{query}\nintent:{intent.label}"
         try:
-            return self.tools.search_rag(query)
+            return _normalize_memory(self.tools.search_rag(query))
         except Exception:
             return []
 
@@ -269,8 +304,10 @@ class Executor:
                 "Use the plan and step_results.",
                 "Do not add facts that are absent from retrieved_context.",
                 "Cite source paths from retrieved_context.",
+                "Prefer Obsidian facts over Qdrant recall when they conflict.",
             ],
             "task": plan.task,
+            "intent": asdict(plan.intent),
             "retrieved_context": plan.context,
             "plan": [asdict(step) for step in plan.steps],
             "step_results": [asdict(result) for result in results],
@@ -318,11 +355,6 @@ class Critic:
     def critique(self, task: str, plan: Plan, output: ExecutorOutput) -> Critique:
         if not plan.steps:
             return Critique(False, True, "planner produced no executable steps", 1.0, 0.0)
-        if not output.structured:
-            return Critique(False, True, "executor output was not structured JSON", 1.0, 0.0)
-        failed = [result for result in output.step_results if not result.ok]
-        if failed:
-            return Critique(False, True, f"{len(failed)} step(s) failed", 0.8, 0.0)
         if not plan.context:
             return Critique(
                 accepted=False,
@@ -331,6 +363,19 @@ class Critic:
                 hallucination_risk=1.0,
                 grounding_score=0.0,
             )
+        if not _has_truth_source(plan.context):
+            return Critique(
+                accepted=False,
+                retry=True,
+                reason="retrieved context lacks Obsidian truth-layer grounding",
+                hallucination_risk=0.95,
+                grounding_score=0.0,
+            )
+        if not output.structured:
+            return Critique(False, True, "executor output was not structured JSON", 1.0, 0.0)
+        failed = [result for result in output.step_results if not result.ok]
+        if failed:
+            return Critique(False, True, f"{len(failed)} step(s) failed", 0.8, 0.0)
         if not output.draft_response.strip():
             return Critique(False, True, "executor returned no grounded draft", 1.0, 0.0)
         grounding = _grounding_score(output.draft_response, plan.context)
@@ -344,6 +389,7 @@ class Critic:
                 "Reject unsupported claims.",
                 "Set retry true when the executor should revise.",
                 "Never approve if there was no plan or no retrieved context.",
+                "Never approve if the answer is not grounded by Obsidian truth-layer memory.",
             ],
             "task": task,
             "plan": self._plan_dict(plan),
@@ -394,22 +440,30 @@ class MultiAgentLoop:
         self.planner = Planner(llm=llm, tools=tools)
         self.executor = Executor(llm=llm, tools=tools, sandbox=sandbox)
         self.critic = Critic(llm=llm)
+        self.classifier = IntentClassifier()
         self.max_rounds = max_rounds
 
     def run(self, task: str) -> dict[str, Any]:
+        intent = self.classifier.classify(task)
         feedback = ""
         history = []
         final_answer = ""
         final_critique: Critique | None = None
         for round_index in range(1, self.max_rounds + 1):
-            plan = self.planner.plan(task, feedback=feedback)
+            plan = self.planner.plan(task, feedback=feedback, intent=intent)
             output = self.executor.execute(plan)
             critique = self.critic.critique(task, plan, output)
             final_critique = critique
             history.append(
                 {
                     "round": round_index,
-                    "plan": {"task": plan.task, "context": plan.context, "steps": [asdict(step) for step in plan.steps]},
+                    "intent": asdict(intent),
+                    "plan": {
+                        "task": plan.task,
+                        "intent": asdict(plan.intent),
+                        "context": plan.context,
+                        "steps": [asdict(step) for step in plan.steps],
+                    },
                     "executor_output": asdict(output),
                     "critique": asdict(critique),
                 }
@@ -431,6 +485,47 @@ class MultiAgentLoop:
 
 def _chunk_text(chunk: dict[str, Any]) -> str:
     return str(chunk.get("text") or chunk.get("content") or chunk.get("markdown") or "")
+
+
+def _chunk_source(chunk: dict[str, Any]) -> str:
+    return str(chunk.get("source") or chunk.get("backend") or chunk.get("kind") or chunk.get("path") or "").lower()
+
+
+def _has_truth_source(context: list[dict[str, Any]]) -> bool:
+    for chunk in context:
+        source = _chunk_source(chunk)
+        if "obsidian" in source or str(chunk.get("path") or "").endswith(".md"):
+            return True
+    return False
+
+
+def _normalize_memory(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    normalized: list[dict[str, Any]] = []
+    for row in rows:
+        if not isinstance(row, dict):
+            continue
+        text = _chunk_text(row).strip()
+        if not text:
+            continue
+        source = row.get("source") or row.get("backend") or row.get("kind")
+        path = row.get("path") or row.get("title") or row.get("id") or ""
+        normalized.append(
+            {
+                **row,
+                "text": text,
+                "path": str(path),
+                "source": str(source or ("obsidian" if str(path).endswith(".md") else "qdrant")),
+                "score": float(row.get("score") or 0.0),
+            }
+        )
+    normalized.sort(
+        key=lambda chunk: (
+            1 if "obsidian" in _chunk_source(chunk) or str(chunk.get("path") or "").endswith(".md") else 0,
+            float(chunk.get("score") or 0.0),
+        ),
+        reverse=True,
+    )
+    return normalized
 
 
 def _terms(text: str) -> set[str]:

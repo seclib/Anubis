@@ -1,7 +1,20 @@
-# Tauri + React + Typescript
+# ANUBIS Architecture Scaffold
 
-This template should help get you started developing with Tauri, React and Typescript in Vite.
+ANUBIS is being bootstrapped as a production-grade AI coding agent inspired by Claude Code / Codex.
 
-## Recommended IDE Setup
+This directory is the Phase 0 architecture foundation only. It contains structure and placeholder entry files, not feature implementation.
 
-- [VS Code](https://code.visualstudio.com/) + [Tauri](https://marketplace.visualstudio.com/items?itemName=tauri-apps.tauri-vscode) + [rust-analyzer](https://marketplace.visualstudio.com/items?itemName=rust-lang.rust-analyzer)
+## Layers
+
+- `core/`: agent loop, planner, executor, verifier
+- `tools/`: filesystem, shell command, and git system tools
+- `context/`: task-driven repository context indexing, retrieval, and compression
+- `task/`: task manager boundary
+- `models/`: model routing boundary
+- `ui/`: desktop UI boundary
+- `logs/`: execution trace storage boundary
+- `tests/`: architecture and module tests
+
+## Phase 0 Rule
+
+No implementation logic belongs here yet. Later phases should fill these module boundaries while preserving the layer separation defined in `implementation.md`.

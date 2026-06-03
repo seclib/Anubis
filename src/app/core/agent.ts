@@ -1,11 +1,13 @@
-import { invoke } from "@tauri-apps/api/core";
+import type { AnubisMemory } from "./memory";
+import { formatRagContext, retrieveLightRag } from "./rag";
+import { detectToolCalls, executeToolCall, stripToolMarkup } from "./tools";
+import type { ToolCall, ToolResult } from "./tools";
 
-export type AgentRole = "system" | "user" | "assistant" | "tool";
+export type AgentRole = "system" | "user" | "assistant";
 
 export type AgentMessage = {
   role: AgentRole;
   content: string;
-  createdAt?: string;
 };
 
 export type RagDocument = {
@@ -20,15 +22,7 @@ export type RagMatch = RagDocument & {
   score: number;
 };
 
-export type ToolCall = {
-  name: string;
-  payload: Record<string, unknown>;
-};
-
-export type ToolResult = {
-  tool: string;
-  output: unknown;
-};
+export type { ToolCall, ToolResult } from "./tools";
 
 export type AgentRunResult = {
   answer: string;
@@ -38,9 +32,19 @@ export type AgentRunResult = {
   aborted: boolean;
 };
 
+export type AgentPipelineStage =
+  | "context"
+  | "prompt"
+  | "stream"
+  | "tool_detection"
+  | "tool_execution"
+  | "memory_write"
+  | "done";
+
 export type AgentCallbacks = {
   onToken?: (token: string) => void;
   onText?: (text: string) => void;
+  onStage?: (stage: AgentPipelineStage) => void;
   onToolCall?: (call: ToolCall) => void;
   onToolResult?: (result: ToolResult) => void;
   onError?: (error: Error) => void;
@@ -50,24 +54,21 @@ export type AgentCallbacks = {
 export type AgentConfig = {
   model?: string;
   ollamaUrl?: string;
-  memory?: AgentMemory;
-  ragDocuments?: RagDocument[];
-  retrieveRag?: (query: string, signal?: AbortSignal) => RagMatch[] | Promise<RagMatch[]>;
-  maxMessages?: number;
-  maxMemoryChars?: number;
+  memory?: AnubisMemory;
+  rag?: false | {
+    retrieve?: (query: string, signal?: AbortSignal) => RagMatch[] | Promise<RagMatch[]>;
+    maxContextChars?: number;
+  };
   maxPromptChars?: number;
-  maxRagMatches?: number;
   requestOptions?: {
     numCtx?: number;
     temperature?: number;
     numPredict?: number;
   };
-  summarize?: (messages: AgentMessage[]) => string | Promise<string>;
-  executeTool?: (call: ToolCall, signal?: AbortSignal) => unknown | Promise<unknown>;
 };
 
 type OllamaChatMessage = {
-  role: "system" | "user" | "assistant" | "tool";
+  role: "system" | "user" | "assistant";
   content: string;
 };
 
@@ -81,124 +82,70 @@ type OllamaStreamChunk = {
 };
 
 const DEFAULT_MODEL = "qwen2.5-coder:7b";
-const DEFAULT_OLLAMA_URL = "http://127.0.0.1:11434";
-const DEFAULT_MAX_MESSAGES = 8;
-const DEFAULT_MAX_MEMORY_CHARS = 6000;
-const DEFAULT_MAX_PROMPT_CHARS = 12000;
-const DEFAULT_MAX_RAG_MATCHES = 4;
-const TOOL_TAG_PATTERN = /<tool>([\s\S]*?)<\/tool>/gi;
+const DEFAULT_OLLAMA_URL = "http://localhost:11434";
+const DEFAULT_MAX_PROMPT_CHARS = 7_000;
 
+type PipelineContext = {
+  memoryContext?: string;
+  ragContext?: string;
+  ragMatches: RagMatch[];
+};
+
+// Compatibility shim for the MVP store. The MVP agent does not read or retain memory.
 export class AgentMemory {
-  private messages: AgentMessage[];
-  private summary = "";
-  private readonly maxMessages: number;
-  private readonly maxChars: number;
-  private readonly summarize?: AgentConfig["summarize"];
-
-  constructor(options: Pick<AgentConfig, "maxMessages" | "maxMemoryChars" | "summarize"> = {}) {
-    this.messages = [];
-    this.maxMessages = options.maxMessages ?? DEFAULT_MAX_MESSAGES;
-    this.maxChars = options.maxMemoryChars ?? DEFAULT_MAX_MEMORY_CHARS;
-    this.summarize = options.summarize;
-  }
-
+  constructor(_options: unknown = {}) {}
   snapshot(): AgentMessage[] {
-    return [...this.messages];
+    return [];
   }
-
   getSummary(): string {
-    return this.summary;
+    return "";
   }
-
-  async add(message: AgentMessage): Promise<void> {
-    this.messages.push({
-      ...message,
-      createdAt: message.createdAt ?? new Date().toISOString(),
-    });
-    await this.trim();
-  }
-
-  async addPair(user: string, assistant: string): Promise<void> {
-    await this.add({ role: "user", content: user });
-    await this.add({ role: "assistant", content: assistant });
-  }
-
-  clear(): void {
-    this.messages = [];
-    this.summary = "";
-  }
-
-  private async trim(): Promise<void> {
-    while (this.messages.length > this.maxMessages || totalChars(this.messages) > this.maxChars) {
-      const removed = this.messages.splice(0, Math.max(1, this.messages.length - this.maxMessages));
-      if (!removed.length) {
-        break;
-      }
-
-      if (this.summarize) {
-        const nextSummary = await this.summarize(removed);
-        if (nextSummary.trim()) {
-          this.summary = compactText([this.summary, nextSummary].filter(Boolean).join("\n"), this.maxChars / 2);
-        }
-      } else if (!this.summary) {
-        this.summary = compactText(removed.map((item) => `${item.role}: ${item.content}`).join("\n"), 1200);
-      }
-    }
-  }
+  async add(): Promise<void> {}
+  async addPair(): Promise<void> {}
+  clear(): void {}
 }
 
 export class AnubisAgentV2 {
   private readonly model: string;
   private readonly ollamaUrl: string;
-  private readonly memory: AgentMemory;
-  private readonly ragDocuments: RagDocument[];
-  private readonly retrieveRag?: NonNullable<AgentConfig["retrieveRag"]>;
+  private readonly memory?: AnubisMemory;
+  private readonly rag: NonNullable<AgentConfig["rag"]> | false;
   private readonly maxPromptChars: number;
-  private readonly maxRagMatches: number;
   private readonly requestOptions: Required<NonNullable<AgentConfig["requestOptions"]>>;
-  private readonly executeTool?: AgentConfig["executeTool"];
 
   constructor(config: AgentConfig = {}) {
     this.model = config.model ?? envValue("VITE_OLLAMA_MODEL", DEFAULT_MODEL);
     this.ollamaUrl = trimTrailingSlash(config.ollamaUrl ?? envValue("VITE_OLLAMA_URL", DEFAULT_OLLAMA_URL));
-    this.memory =
-      config.memory ??
-      new AgentMemory({
-        maxMessages: config.maxMessages,
-        maxMemoryChars: config.maxMemoryChars,
-        summarize: config.summarize,
-      });
-    this.ragDocuments = config.ragDocuments ?? [];
-    this.retrieveRag = config.retrieveRag;
+    this.memory = config.memory;
+    this.rag = config.rag ?? {};
     this.maxPromptChars = config.maxPromptChars ?? DEFAULT_MAX_PROMPT_CHARS;
-    this.maxRagMatches = config.maxRagMatches ?? DEFAULT_MAX_RAG_MATCHES;
     this.requestOptions = {
       numCtx: config.requestOptions?.numCtx ?? 4096,
       temperature: config.requestOptions?.temperature ?? 0.2,
       numPredict: config.requestOptions?.numPredict ?? 1024,
     };
-    this.executeTool = config.executeTool;
   }
 
   async run(input: string, callbacks: AgentCallbacks = {}, signal?: AbortSignal): Promise<AgentRunResult> {
     const prompt = input.trim();
     if (!prompt) {
-      return { answer: "", rag: [], toolCalls: [], toolResults: [], aborted: false };
+      return emptyResult(false);
     }
 
-    const rag = await this.collectRag(prompt, signal);
-    const messages = buildPrompt({
-      input: prompt,
-      memory: this.memory.snapshot(),
-      memorySummary: this.memory.getSummary(),
-      rag,
+    let aborted = false;
+    callbacks.onStage?.("context");
+    const context = await this.buildPipelineContext(prompt, signal);
+    callbacks.onStage?.("prompt");
+    const messages = buildPrompt(prompt, {
+      memoryContext: context.memoryContext,
+      ragContext: context.ragContext,
       maxChars: this.maxPromptChars,
     });
 
     let answer = "";
-    let aborted = false;
 
     try {
+      callbacks.onStage?.("stream");
       for await (const token of streamOllamaChat(
         {
           model: this.model,
@@ -222,138 +169,95 @@ export class AnubisAgentV2 {
       }
     }
 
-    const toolCalls = detectToolCalls(answer);
-    const toolResults: ToolResult[] = [];
+    callbacks.onStage?.("tool_detection");
+    const toolCalls = aborted ? [] : detectToolCalls(answer);
+    callbacks.onStage?.("tool_execution");
+    const toolResults = await this.executeTools(toolCalls, callbacks);
 
-    if (!aborted) {
-      for (const toolCall of toolCalls) {
-        callbacks.onToolCall?.(toolCall);
-        const output = await this.runTool(toolCall, signal);
-        const result = { tool: toolCall.name, output };
-        toolResults.push(result);
-        callbacks.onToolResult?.(result);
-      }
-
-      await this.memory.addPair(prompt, stripToolMarkup(answer));
+    const cleanedAnswer = stripToolMarkup(answer) || answer;
+    const result: AgentRunResult = {
+      answer,
+      rag: context.ragMatches,
+      toolCalls,
+      toolResults,
+      aborted,
+    };
+    if (!aborted && cleanedAnswer.trim()) {
+      callbacks.onStage?.("memory_write");
+      await this.memory?.addPair(prompt, cleanedAnswer).catch(() => undefined);
     }
-
-    const result = { answer, rag, toolCalls, toolResults, aborted };
+    callbacks.onStage?.("done");
     callbacks.onDone?.(result);
     return result;
   }
 
-  private async runTool(call: ToolCall, signal?: AbortSignal): Promise<unknown> {
-    if (this.executeTool) {
-      return this.executeTool(call, signal);
+  private async buildPipelineContext(input: string, signal?: AbortSignal): Promise<PipelineContext> {
+    const [memoryContext, ragMatches] = await Promise.all([
+      this.memory?.buildContext(input).catch(() => undefined),
+      this.collectRag(input, signal),
+    ]);
+
+    return {
+      memoryContext: memoryContext?.text,
+      ragContext: formatRagContext(ragMatches, this.rag ? this.rag.maxContextChars : undefined),
+      ragMatches,
+    };
+  }
+
+  private async executeTools(toolCalls: ToolCall[], callbacks: AgentCallbacks): Promise<ToolResult[]> {
+    const results: ToolResult[] = [];
+
+    for (const toolCall of toolCalls) {
+      callbacks.onToolCall?.(toolCall);
+      const toolResult = await executeToolCall(toolCall);
+      results.push(toolResult);
+      callbacks.onToolResult?.(toolResult);
     }
 
-    if (!isTauriRuntime()) {
-      throw new Error(`Tool execution requires Tauri runtime: ${call.name}`);
-    }
-
-    return invoke("route_tool", {
-      tool: call.name,
-      payload: call.payload,
-    });
+    return results;
   }
 
   private async collectRag(query: string, signal?: AbortSignal): Promise<RagMatch[]> {
-    const localMatches = lightRagSearch(query, this.ragDocuments, this.maxRagMatches);
-    const externalMatches = this.retrieveRag ? await this.retrieveRag(query, signal) : [];
-    return dedupeRagMatches([...externalMatches, ...localMatches]).slice(0, this.maxRagMatches);
+    if (this.rag === false) {
+      return [];
+    }
+
+    if (this.rag.retrieve) {
+      return Promise.resolve(this.rag.retrieve(query, signal)).catch(() => []);
+    }
+
+    return retrieveLightRag(query, { maxContextChars: this.rag.maxContextChars }, signal).catch(() => []);
   }
 }
 
-export function buildPrompt(args: {
-  input: string;
-  memory: AgentMessage[];
-  memorySummary?: string;
-  rag?: RagMatch[];
-  maxChars?: number;
-}): OllamaChatMessage[] {
-  const maxChars = args.maxChars ?? DEFAULT_MAX_PROMPT_CHARS;
-  const system = compactText(
-    [
-      "You are ANUBIS, a local AI coding agent running on Qwen2.5-Coder 7B.",
-      "Optimize for concise, correct engineering help with minimal context usage.",
-      "Use provided memory and RAG snippets only when relevant.",
-      "When a tool is required, output exactly one tool call and no prose.",
-      'JSON tool format: {"tool":"name","payload":{}}',
-      'Tag tool format: <tool>{"name":"name","payload":{}}</tool>',
-      "If no tool is required, answer normally.",
-    ].join("\n"),
-    1400,
+export function buildPrompt(
+  prompt: string,
+  context: {
+    memoryContext?: string;
+    ragContext?: string;
+    maxChars?: number;
+  } = {},
+): OllamaChatMessage[] {
+  const maxChars = context.maxChars ?? DEFAULT_MAX_PROMPT_CHARS;
+  const contextText = compactText(
+    [context.memoryContext, context.ragContext].filter(Boolean).join("\n\n"),
+    Math.max(0, maxChars - prompt.length - 1_200),
   );
-
-  const memoryBlock = [
-    args.memorySummary ? `Summary:\n${args.memorySummary}` : "",
-    args.memory.map((item) => `${item.role}: ${item.content}`).join("\n"),
-  ]
-    .filter(Boolean)
-    .join("\n\n");
-
-  const ragBlock = (args.rag ?? [])
-    .map((item, index) => {
-      const label = item.title || item.path || item.id;
-      return `[${index + 1}] ${label}\n${compactText(item.text, 900)}`;
-    })
-    .join("\n\n");
-
-  const context = compactText(
-    [
-      memoryBlock ? `Recent memory:\n${memoryBlock}` : "",
-      ragBlock ? `Relevant local context:\n${ragBlock}` : "",
-    ]
-      .filter(Boolean)
-      .join("\n\n"),
-    Math.max(1000, maxChars - system.length - args.input.length - 600),
-  );
+  const userContent = contextText
+    ? `Relevant context:\n${contextText}\n\nCurrent user request:\n${compactText(prompt, Math.max(1_000, maxChars / 3))}`
+    : compactText(prompt, maxChars);
 
   return [
-    { role: "system", content: system },
-    ...(context ? [{ role: "system" as const, content: context }] : []),
-    { role: "user", content: compactText(args.input, Math.max(1000, maxChars / 3)) },
+    {
+      role: "system",
+      content:
+        'You are ANUBIS, a local AI coding assistant. Use provided memory and local context only when relevant. Answer clearly and concisely. Do not claim to edit files or run commands. If a safe tool is required, output exactly one JSON tool call like {"tool":"read_file","payload":{"path":"vault/README.md"}} or <tool>{"name":"git_status","payload":{}}</tool>.',
+    },
+    {
+      role: "user",
+      content: userContent,
+    },
   ];
-}
-
-export function lightRagSearch(query: string, docs: RagDocument[], limit = DEFAULT_MAX_RAG_MATCHES): RagMatch[] {
-  const queryTerms = tokenize(query);
-  if (!queryTerms.length || !docs.length) {
-    return [];
-  }
-
-  return docs
-    .map((doc) => {
-      const haystack = tokenize([doc.title, doc.path, doc.keywords?.join(" "), doc.text].filter(Boolean).join(" "));
-      const uniqueHaystack = new Set(haystack);
-      const score = queryTerms.reduce((sum, term) => sum + (uniqueHaystack.has(term) ? 1 : 0), 0);
-      return { ...doc, score };
-    })
-    .filter((doc) => doc.score > 0)
-    .sort((left, right) => right.score - left.score || left.text.length - right.text.length)
-    .slice(0, limit);
-}
-
-export function detectToolCalls(text: string): ToolCall[] {
-  const calls: ToolCall[] = [];
-  let match: RegExpExecArray | null;
-
-  while ((match = TOOL_TAG_PATTERN.exec(text)) !== null) {
-    const parsed = parseToolJson(match[1]);
-    if (parsed) {
-      calls.push(parsed);
-    }
-  }
-
-  const trimmed = text.trim();
-  if (trimmed.startsWith("{") && trimmed.endsWith("}")) {
-    const parsed = parseToolJson(trimmed);
-    if (parsed) {
-      calls.push(parsed);
-    }
-  }
-
-  return dedupeToolCalls(calls);
 }
 
 export async function* streamOllamaChat(
@@ -372,7 +276,6 @@ export async function* streamOllamaChat(
       model: args.model,
       messages: args.messages,
       stream: true,
-      keep_alive: "30m",
       options: {
         num_ctx: args.options.numCtx,
         temperature: args.options.temperature,
@@ -382,8 +285,12 @@ export async function* streamOllamaChat(
     signal,
   });
 
-  if (!response.ok || !response.body) {
+  if (!response.ok) {
     throw new Error(`Ollama returned HTTP ${response.status}`);
+  }
+
+  if (!response.body) {
+    throw new Error("Ollama response did not include a stream body");
   }
 
   const reader = response.body.getReader();
@@ -424,92 +331,43 @@ function parseOllamaToken(line: string): string {
     return "";
   }
 
-  const data = JSON.parse(trimmed) as OllamaStreamChunk;
-  if (data.error) {
-    throw new Error(data.error);
+  const chunk = JSON.parse(trimmed) as OllamaStreamChunk;
+  if (chunk.error) {
+    throw new Error(chunk.error);
   }
 
-  return data.message?.content ?? data.response ?? "";
+  return chunk.message?.content ?? chunk.response ?? "";
 }
 
-function parseToolJson(raw: string): ToolCall | null {
-  try {
-    const parsed = JSON.parse(raw.trim()) as Record<string, unknown>;
-    const name = stringValue(parsed.tool) ?? stringValue(parsed.name);
-    const payload = isRecord(parsed.payload) ? parsed.payload : {};
-    return name ? { name, payload } : null;
-  } catch {
-    return null;
-  }
-}
-
-function dedupeToolCalls(calls: ToolCall[]): ToolCall[] {
-  const seen = new Set<string>();
-  return calls.filter((call) => {
-    const key = `${call.name}:${JSON.stringify(call.payload)}`;
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
-
-function dedupeRagMatches(matches: RagMatch[]): RagMatch[] {
-  const seen = new Set<string>();
-  return matches.filter((match) => {
-    const key = match.path || match.id || match.text.slice(0, 80);
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    return true;
-  });
-}
-
-function stripToolMarkup(text: string): string {
-  return text.replace(TOOL_TAG_PATTERN, "").trim();
-}
-
-function tokenize(value: string): string[] {
-  return value
-    .toLowerCase()
-    .replace(/[^a-z0-9_./-]+/g, " ")
-    .split(/\s+/)
-    .filter((term) => term.length > 2);
-}
-
-function compactText(value: string, maxChars: number): string {
-  const normalized = value.replace(/\s+\n/g, "\n").replace(/\n{3,}/g, "\n\n").trim();
-  if (normalized.length <= maxChars) {
-    return normalized;
-  }
-
-  return `${normalized.slice(0, Math.max(0, maxChars - 16)).trimEnd()}\n...[trimmed]`;
-}
-
-function totalChars(messages: AgentMessage[]): number {
-  return messages.reduce((sum, message) => sum + message.content.length, 0);
+function emptyResult(aborted: boolean): AgentRunResult {
+  return {
+    answer: "",
+    rag: [],
+    toolCalls: [],
+    toolResults: [],
+    aborted,
+  };
 }
 
 function envValue(name: string, fallback: string): string {
   return String(import.meta.env[name] ?? fallback);
 }
 
-function isTauriRuntime(): boolean {
-  return typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
-}
-
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, "");
 }
 
-function stringValue(value: unknown): string | undefined {
-  return typeof value === "string" && value.trim() ? value : undefined;
-}
+function compactText(value: string, maxChars: number): string {
+  if (maxChars <= 0) {
+    return "";
+  }
 
-function isRecord(value: unknown): value is Record<string, unknown> {
-  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+  const normalized = value.replace(/\n{3,}/g, "\n\n").trim();
+  if (normalized.length <= maxChars) {
+    return normalized;
+  }
+
+  return `${normalized.slice(0, Math.max(0, maxChars - 14)).trimEnd()}\n...[trimmed]`;
 }
 
 function normalizeError(error: unknown): Error {

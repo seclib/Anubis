@@ -1,0 +1,142 @@
+version: "3.9"
+
+x-env: &env
+  ANUBIS_ENV: production
+  ANUBIS_LOG_LEVEL: ${ANUBIS_LOG_LEVEL:-INFO}
+  ANUBIS_REDIS_URL: redis://redis:6379/0
+  ANUBIS_QDRANT_URL: http://qdrant:6333
+  ANUBIS_QDRANT_COLLECTION: ${ANUBIS_QDRANT_COLLECTION:-anubis_memory}
+  ANUBIS_GIT_REMOTE: ${ANUBIS_GIT_REMOTE:-origin}
+  ANUBIS_REPO_ROOT: /workspace/repos
+  ANUBIS_TOOL_RUNNER_URL: http://tool-runner:8080
+  ANUBIS_COMPANY_RUNTIME_ENABLED: ${ANUBIS_COMPANY_RUNTIME_ENABLED:-false}
+  ANUBIS_COMPANY_CYCLE_INTERVAL_SECONDS: ${ANUBIS_COMPANY_CYCLE_INTERVAL_SECONDS:-60}
+
+x-deploy-default: &deploy-default
+  restart_policy:
+    condition: on-failure
+  update_config:
+    order: start-first
+    failure_action: rollback
+  rollback_config:
+    order: stop-first
+
+services:
+  api-gateway:
+    image: anubis/distributed:${ANUBIS_IMAGE_TAG:-latest}
+    command: ["--role", "api-gateway"]
+    environment: *env
+    ports:
+      - target: 8080
+        published: ${ANUBIS_API_PORT:-8080}
+        protocol: tcp
+        mode: ingress
+    networks: [anubis-control]
+    deploy:
+      <<: *deploy-default
+      replicas: 2
+
+  company-runtime:
+    image: anubis/distributed:${ANUBIS_IMAGE_TAG:-latest}
+    command: ["--role", "company-runtime"]
+    environment: *env
+    volumes:
+      - git_repos:/workspace/repos
+    networks: [anubis-control]
+    deploy:
+      <<: *deploy-default
+      replicas: 1
+
+  orchestrator:
+    image: anubis/distributed:${ANUBIS_IMAGE_TAG:-latest}
+    command: ["--role", "orchestrator"]
+    environment: *env
+    networks: [anubis-control]
+    deploy:
+      <<: *deploy-default
+      replicas: 2
+
+  planner:
+    image: anubis/distributed:${ANUBIS_IMAGE_TAG:-latest}
+    command: ["--role", "planner"]
+    environment: *env
+    networks: [anubis-control]
+    deploy:
+      <<: *deploy-default
+      replicas: 2
+
+  executor:
+    image: anubis/distributed:${ANUBIS_IMAGE_TAG:-latest}
+    command: ["--role", "executor"]
+    environment: *env
+    volumes:
+      - git_repos:/workspace/repos
+      - tool_sandbox:/workspace/sandbox
+    networks: [anubis-control]
+    deploy:
+      <<: *deploy-default
+      replicas: ${ANUBIS_EXECUTOR_REPLICAS:-3}
+      resources:
+        limits:
+          cpus: "2"
+          memory: 2G
+
+  reviewer:
+    image: anubis/distributed:${ANUBIS_IMAGE_TAG:-latest}
+    command: ["--role", "reviewer"]
+    environment: *env
+    networks: [anubis-control]
+    deploy:
+      <<: *deploy-default
+      replicas: 2
+
+  tool-runner:
+    image: anubis/distributed:${ANUBIS_IMAGE_TAG:-latest}
+    command: ["--role", "tool-runner"]
+    environment: *env
+    volumes:
+      - tool_sandbox:/workspace/sandbox
+      - tool_audit:/var/log/anubis
+    networks: [anubis-control]
+    deploy:
+      <<: *deploy-default
+      replicas: 2
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000"]
+    volumes:
+      - redis_data:/data
+    networks: [anubis-control]
+    deploy:
+      <<: *deploy-default
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.anubis.stateful == true
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.6
+    volumes:
+      - qdrant_storage:/qdrant/storage
+      - qdrant_snapshots:/qdrant/snapshots
+    networks: [anubis-control]
+    deploy:
+      <<: *deploy-default
+      replicas: 1
+      placement:
+        constraints:
+          - node.labels.anubis.stateful == true
+
+networks:
+  anubis-control:
+    driver: overlay
+    attachable: true
+
+volumes:
+  redis_data:
+  qdrant_storage:
+  qdrant_snapshots:
+  git_repos:
+  tool_sandbox:
+  tool_audit:

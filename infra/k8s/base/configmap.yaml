@@ -1,0 +1,16 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: anubis-config
+data:
+  ANUBIS_ENV: production
+  ANUBIS_LOG_LEVEL: INFO
+  ANUBIS_REDIS_URL: redis://redis:6379/0
+  ANUBIS_QDRANT_URL: http://qdrant:6333
+  ANUBIS_QDRANT_COLLECTION: anubis_memory
+  ANUBIS_GIT_REMOTE: origin
+  ANUBIS_REPO_ROOT: /workspace/repos
+  ANUBIS_TOOL_RUNNER_URL: http://tool-runner:8080
+  ANUBIS_COMPANY_RUNTIME_ENABLED: "false"
+  ANUBIS_COMPANY_CYCLE_INTERVAL_SECONDS: "60"
+  ANUBIS_HEALTH_PORT: "8080"

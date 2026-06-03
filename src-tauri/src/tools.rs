@@ -12,9 +12,22 @@ use tauri::AppHandle;
 const MAX_FILE_BYTES: usize = 256 * 1024;
 const MAX_WRITE_BYTES: usize = 512 * 1024;
 const MAX_SEARCH_RESULTS: usize = 200;
+const MAX_ARG_COUNT: usize = 32;
+const MAX_ARG_BYTES: usize = 8 * 1024;
+const MAX_PROCESS_OUTPUT_BYTES: usize = 128 * 1024;
 const DEFAULT_TIMEOUT_MS: u64 = 10_000;
 const MAX_TIMEOUT_MS: u64 = 30_000;
 
+const ALLOWED_TOOLS: &[&str] = &[
+    "read_file",
+    "write_file",
+    "search_files",
+    "run_shell",
+    "git",
+    "git_status",
+    "git_diff",
+    "git_log",
+];
 const ALLOWED_COMMANDS: &[&str] = &["rg", "grep", "ls", "pwd", "sed", "cat", "head", "tail", "wc"];
 const BLOCKED_TOKENS: &[&str] = &[
     "rm",
@@ -74,14 +87,14 @@ pub fn route_tool(app: AppHandle, tool: String, payload: Value) -> Result<ToolRe
     let root = super::project_root(&app)?;
     let root = canonical_root(&root)?;
 
-    let result = match request.tool.as_str() {
+    let result = validate_tool_name(&request.tool).and_then(|_| match request.tool.as_str() {
         "read_file" => read_file(&root, &request.payload),
         "write_file" => write_file(&root, &request.payload),
         "search_files" => search_files(&root, &request.payload),
         "run_shell" => run_shell(&root, &request.payload),
         "git" | "git_status" | "git_diff" | "git_log" => git_operation(&root, &request.tool, &request.payload),
         other => Err(format!("Unknown tool: {other}")),
-    };
+    });
 
     let duration_ms = started.elapsed().as_millis();
     audit_tool(&root, &request, result.as_ref().map(|_| ()), duration_ms);
@@ -153,7 +166,7 @@ fn search_files(root: &Path, payload: &Value) -> Result<Value, String> {
 fn run_shell(root: &Path, payload: &Value) -> Result<Value, String> {
     let argv = command_argv(payload)?;
     validate_command(&argv)?;
-    run_process(root, &argv, timeout_ms(payload))
+    run_process(root, &argv, timeout_ms(payload)?)
 }
 
 fn git_operation(root: &Path, tool: &str, payload: &Value) -> Result<Value, String> {
@@ -178,7 +191,7 @@ fn git_operation(root: &Path, tool: &str, payload: &Value) -> Result<Value, Stri
         other => return Err(format!("Unsupported git operation: {other}")),
     }
 
-    run_process(root, &argv, timeout_ms(payload))
+    run_process(root, &argv, timeout_ms(payload)?)
 }
 
 fn run_process(root: &Path, argv: &[String], timeout_ms: u64) -> Result<Value, String> {
@@ -198,8 +211,10 @@ fn run_process(root: &Path, argv: &[String], timeout_ms: u64) -> Result<Value, S
             return Ok(json!({
                 "command": argv,
                 "exitCode": output.status.code(),
-                "stdout": String::from_utf8_lossy(&output.stdout),
-                "stderr": String::from_utf8_lossy(&output.stderr),
+                "stdout": lossy_truncated(&output.stdout, MAX_PROCESS_OUTPUT_BYTES),
+                "stderr": lossy_truncated(&output.stderr, MAX_PROCESS_OUTPUT_BYTES),
+                "stdoutTruncated": output.stdout.len() > MAX_PROCESS_OUTPUT_BYTES,
+                "stderrTruncated": output.stderr.len() > MAX_PROCESS_OUTPUT_BYTES,
             }));
         }
 
@@ -278,6 +293,12 @@ fn validate_command(argv: &[String]) -> Result<(), String> {
     if argv.is_empty() {
         return Err("run_shell command cannot be empty".into());
     }
+    if argv.len() > MAX_ARG_COUNT {
+        return Err(format!("run_shell cannot exceed {MAX_ARG_COUNT} arguments"));
+    }
+    if argv.iter().map(|arg| arg.len()).sum::<usize>() > MAX_ARG_BYTES {
+        return Err(format!("run_shell arguments exceed {MAX_ARG_BYTES} byte limit"));
+    }
 
     let program = argv[0].as_str();
     if !ALLOWED_COMMANDS.contains(&program) {
@@ -313,6 +334,10 @@ fn validate_shell_argument(arg: &str) -> Result<(), String> {
         || value.starts_with("../")
         || value.contains("/../")
         || value.ends_with("/..")
+        || value.starts_with("..\\")
+        || value.contains("\\..\\")
+        || value.ends_with("\\..")
+        || value.contains('\0')
     {
         return Err(format!("Path escapes are not allowed in shell arguments: {arg}"));
     }
@@ -333,8 +358,14 @@ fn command_argv(payload: &Value) -> Result<Vec<String>, String> {
     }
 
     let command = required_string(payload, "command")?;
+    if command.trim().is_empty() {
+        return Err("run_shell command cannot be empty".into());
+    }
     if BLOCKED_SHELL_PATTERNS.iter().any(|pattern| command.contains(pattern)) {
         return Err("run_shell command contains blocked shell syntax".into());
+    }
+    if command.contains('\0') {
+        return Err("run_shell command contains invalid null byte".into());
     }
 
     Ok(command.split_whitespace().map(ToString::to_string).collect())
@@ -358,7 +389,8 @@ fn sandbox_path_for_write(root: &Path, value: &str) -> Result<PathBuf, String> {
     }
 
     let parent = path.parent().ok_or_else(|| "Invalid path".to_string())?;
-    let canonical_parent = parent.canonicalize().map_err(|error| error.to_string())?;
+    let existing_parent = nearest_existing_parent(parent)?;
+    let canonical_parent = existing_parent.canonicalize().map_err(|error| error.to_string())?;
     ensure_inside(root, &canonical_parent)?;
     Ok(path)
 }
@@ -367,6 +399,15 @@ fn validate_relative_path(value: &str) -> Result<(), String> {
     let path = Path::new(value);
     if value.trim().is_empty() {
         return Err("Path cannot be empty".into());
+    }
+    if value.contains('\0') {
+        return Err("Path cannot contain null bytes".into());
+    }
+    if value.starts_with("\\\\") || value.contains(":\\") || value.contains(":/") {
+        return Err("Platform absolute paths are not allowed".into());
+    }
+    if value.starts_with("..\\") || value.contains("\\..\\") || value.ends_with("\\..") {
+        return Err("Path escapes the project sandbox".into());
     }
     if path.is_absolute() {
         return Err("Absolute paths are not allowed".into());
@@ -380,6 +421,16 @@ fn validate_relative_path(value: &str) -> Result<(), String> {
         }
     }
     Ok(())
+}
+
+fn nearest_existing_parent(path: &Path) -> Result<PathBuf, String> {
+    let mut current = path;
+    loop {
+        if current.exists() {
+            return Ok(current.to_path_buf());
+        }
+        current = current.parent().ok_or_else(|| "No existing parent directory found".to_string())?;
+    }
 }
 
 fn ensure_inside(root: &Path, path: &Path) -> Result<(), String> {
@@ -412,12 +463,27 @@ fn optional_string<'a>(payload: &'a Value, key: &str) -> Option<&'a str> {
     payload.get(key).and_then(Value::as_str)
 }
 
-fn timeout_ms(payload: &Value) -> u64 {
-    payload
-        .get("timeoutMs")
-        .and_then(Value::as_u64)
-        .unwrap_or(DEFAULT_TIMEOUT_MS)
-        .min(MAX_TIMEOUT_MS)
+fn timeout_ms(payload: &Value) -> Result<u64, String> {
+    match payload.get("timeoutMs") {
+        Some(value) => {
+            let timeout = value
+                .as_u64()
+                .ok_or_else(|| "timeoutMs must be a positive integer".to_string())?;
+            if timeout == 0 || timeout > MAX_TIMEOUT_MS {
+                return Err(format!("timeoutMs must be between 1 and {MAX_TIMEOUT_MS}"));
+            }
+            Ok(timeout)
+        }
+        None => Ok(DEFAULT_TIMEOUT_MS),
+    }
+}
+
+fn validate_tool_name(tool: &str) -> Result<(), String> {
+    if ALLOWED_TOOLS.contains(&tool) {
+        Ok(())
+    } else {
+        Err(format!("Unknown tool: {tool}"))
+    }
 }
 
 fn validate_git_rev(value: &str) -> Result<(), String> {
@@ -426,6 +492,15 @@ fn validate_git_rev(value: &str) -> Result<(), String> {
     } else {
         Err("Invalid git revision".into())
     }
+}
+
+fn lossy_truncated(bytes: &[u8], max_bytes: usize) -> String {
+    let slice = if bytes.len() > max_bytes {
+        &bytes[..max_bytes]
+    } else {
+        bytes
+    };
+    String::from_utf8_lossy(slice).into_owned()
 }
 
 fn relative_display(root: &Path, path: &Path) -> String {
@@ -478,4 +553,40 @@ fn unix_timestamp() -> u64 {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or_default()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn rejects_filesystem_escape_paths() {
+        assert!(validate_relative_path("/etc/passwd").is_err());
+        assert!(validate_relative_path("../secret").is_err());
+        assert!(validate_relative_path("vault/../../secret").is_err());
+        assert!(validate_relative_path("C:\\Windows\\System32").is_err());
+    }
+
+    #[test]
+    fn accepts_project_relative_paths() {
+        assert!(validate_relative_path("vault/notes/readme.md").is_ok());
+        assert!(validate_relative_path("./vault/memory/index.json").is_ok());
+    }
+
+    #[test]
+    fn rejects_unapproved_shell_commands() {
+        let argv = vec!["rm".to_string(), "-rf".to_string(), "vault".to_string()];
+        assert!(validate_command(&argv).is_err());
+
+        let payload = json!({ "command": "rg TODO | sh" });
+        assert!(command_argv(&payload).is_err());
+    }
+
+    #[test]
+    fn validates_timeout_bounds() {
+        assert_eq!(timeout_ms(&json!({})).unwrap(), DEFAULT_TIMEOUT_MS);
+        assert!(timeout_ms(&json!({ "timeoutMs": 0 })).is_err());
+        assert!(timeout_ms(&json!({ "timeoutMs": MAX_TIMEOUT_MS + 1 })).is_err());
+    }
 }

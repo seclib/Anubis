@@ -33,6 +33,24 @@ export type PluginManifest = {
   source: string;
 };
 
+export type ToolResponse<T = unknown> = {
+  tool: string;
+  status: "ok" | "error";
+  output: T;
+  durationMs: number;
+};
+
+export type SearchFileMatch = {
+  path: string;
+  line: number;
+  text: string;
+};
+
+export type SearchFilesResult = {
+  query: string;
+  matches: SearchFileMatch[];
+};
+
 const apiUrl = import.meta.env.VITE_ANUBIS_API_URL ?? "http://127.0.0.1:8000";
 
 function isTauriRuntime() {
@@ -85,6 +103,31 @@ export async function listPlugins(): Promise<PluginManifest[]> {
   }
 
   return [];
+}
+
+export async function searchProjectFiles(query: string, path?: string): Promise<SearchFilesResult> {
+  const trimmedQuery = query.trim();
+  if (trimmedQuery.length < 2) {
+    return { query: trimmedQuery, matches: [] };
+  }
+
+  if (!isTauriRuntime()) {
+    return { query: trimmedQuery, matches: [] };
+  }
+
+  const response = await invoke<ToolResponse<SearchFilesResult> | SearchFilesResult>("route_tool", {
+    tool: "search_files",
+    payload: {
+      query: trimmedQuery,
+      ...(path ? { path } : {}),
+    },
+  });
+
+  if ("output" in response) {
+    return response.output;
+  }
+
+  return response;
 }
 
 export function normalizeAgentReply(raw: unknown): AgentReply {

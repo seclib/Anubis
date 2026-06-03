@@ -1,38 +1,41 @@
+import { memo } from "react";
 import type { RefObject } from "react";
 import type { ChatMessage } from "../core/api";
+import { MessageStream } from "./MessageStream";
 
 type ChatProps = {
   messages: ChatMessage[];
-  busy: boolean;
+  currentStream: string;
+  loading: boolean;
   scrollerRef: RefObject<HTMLDivElement>;
 };
 
-export function Chat({ messages, busy, scrollerRef }: ChatProps) {
+export const Chat = memo(function Chat({ messages, currentStream, loading, scrollerRef }: ChatProps) {
   const lastMessage = messages[messages.length - 1];
-  const streamingMessage = busy && lastMessage?.role === "assistant";
+  const streamingMessage = loading && lastMessage?.role === "assistant";
 
   return (
     <div className="message-list" ref={scrollerRef} aria-label="AI chat conversation">
       {messages.map((message) => (
-        <article className={`message ${message.role}`} key={message.id}>
-          <div className="message-meta">{message.role === "assistant" ? "ANUBIS" : message.role === "user" ? "You" : "System"}</div>
-          <p>
-            {message.content}
-            {busy && message.id === lastMessage?.id && message.role === "assistant" && (
-              <span className="stream-cursor" />
-            )}
-          </p>
-        </article>
+        <MessageStream
+          message={message}
+          streaming={loading && message.id === lastMessage?.id && message.role === "assistant"}
+          key={message.id}
+        />
       ))}
-      {busy && !streamingMessage && (
+      {loading && !streamingMessage && (
         <article className="message assistant pending">
           <div className="message-meta">ANUBIS</div>
-          <p>
-            <span className="stream-cursor" />
-            Thinking through the local runtime...
-          </p>
+          <div className="message-body">
+            <span className="typing-indicator" aria-label="ANUBIS is typing">
+              <i />
+              <i />
+              <i />
+            </span>
+            {currentStream || "Thinking..."}
+          </div>
         </article>
       )}
     </div>
   );
-}
+});

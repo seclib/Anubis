@@ -1,0 +1,152 @@
+# ANUBIS DEVIN++ distributed deployment.
+# Local/Swarm-compatible service boundaries; state is externalized to Redis, Qdrant, and Git volumes/remotes.
+
+name: anubis-distributed
+
+x-distributed-env: &distributed-env
+  ANUBIS_ENV: ${ANUBIS_ENV:-production}
+  ANUBIS_LOG_LEVEL: ${ANUBIS_LOG_LEVEL:-INFO}
+  ANUBIS_REDIS_URL: ${ANUBIS_REDIS_URL:-redis://redis:6379/0}
+  ANUBIS_QDRANT_URL: ${ANUBIS_QDRANT_URL:-http://qdrant:6333}
+  ANUBIS_QDRANT_COLLECTION: ${ANUBIS_QDRANT_COLLECTION:-anubis_memory}
+  ANUBIS_GIT_REMOTE: ${ANUBIS_GIT_REMOTE:-origin}
+  ANUBIS_REPO_ROOT: ${ANUBIS_REPO_ROOT:-/workspace/repos}
+  ANUBIS_TOOL_RUNNER_URL: ${ANUBIS_TOOL_RUNNER_URL:-http://tool-runner:8080}
+  ANUBIS_COMPANY_CYCLE_INTERVAL_SECONDS: ${ANUBIS_COMPANY_CYCLE_INTERVAL_SECONDS:-60}
+  ANUBIS_COMPANY_RUNTIME_ENABLED: ${ANUBIS_COMPANY_RUNTIME_ENABLED:-false}
+
+x-anubis-service: &anubis-service
+  build:
+    context: ../..
+    dockerfile: infra/docker/Dockerfile.distributed
+  image: anubis/distributed:${ANUBIS_IMAGE_TAG:-local}
+  environment:
+    <<: *distributed-env
+  networks:
+    - anubis-control
+  restart: unless-stopped
+  read_only: true
+  tmpfs:
+    - /tmp:size=128m,mode=1777
+  security_opt:
+    - no-new-privileges:true
+  cap_drop:
+    - ALL
+  healthcheck:
+    test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/ready', timeout=2).read()"]
+    interval: 15s
+    timeout: 3s
+    retries: 5
+    start_period: 20s
+  logging:
+    driver: json-file
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+services:
+  api-gateway:
+    <<: *anubis-service
+    command: ["--role", "api-gateway"]
+    ports:
+      - "${ANUBIS_API_PORT:-8080}:8080"
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  company-runtime:
+    <<: *anubis-service
+    command: ["--role", "company-runtime"]
+    volumes:
+      - git_repos:/workspace/repos
+    depends_on:
+      redis:
+        condition: service_healthy
+      qdrant:
+        condition: service_healthy
+
+  orchestrator:
+    <<: *anubis-service
+    command: ["--role", "orchestrator"]
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  planner:
+    <<: *anubis-service
+    command: ["--role", "planner"]
+    deploy:
+      replicas: 2
+
+  executor:
+    <<: *anubis-service
+    command: ["--role", "executor"]
+    read_only: false
+    volumes:
+      - git_repos:/workspace/repos
+      - tool_sandbox:/workspace/sandbox
+    deploy:
+      replicas: ${ANUBIS_EXECUTOR_REPLICAS:-2}
+
+  reviewer:
+    <<: *anubis-service
+    command: ["--role", "reviewer"]
+    deploy:
+      replicas: 2
+
+  tool-runner:
+    <<: *anubis-service
+    command: ["--role", "tool-runner"]
+    read_only: false
+    volumes:
+      - tool_sandbox:/workspace/sandbox
+      - tool_audit:/var/log/anubis
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.6
+    ports:
+      - "${QDRANT_HTTP_PORT:-6333}:6333"
+      - "${QDRANT_GRPC_PORT:-6334}:6334"
+    volumes:
+      - qdrant_storage:/qdrant/storage
+      - qdrant_snapshots:/qdrant/snapshots
+      - ../qdrant/config/production.yaml:/qdrant/config/production.yaml:ro
+    command: ["./qdrant", "--config-path", "/qdrant/config/production.yaml"]
+    networks:
+      - anubis-control
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "timeout 2 bash -c '</dev/tcp/127.0.0.1/6333'"]
+      interval: 15s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7.4-alpine
+    command: ["redis-server", "--appendonly", "yes", "--save", "60", "1000", "--loglevel", "notice"]
+    ports:
+      - "${REDIS_PORT:-6379}:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - anubis-control
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+
+networks:
+  anubis-control:
+    driver: bridge
+
+volumes:
+  redis_data:
+  qdrant_storage:
+  qdrant_snapshots:
+  git_repos:
+  tool_sandbox:
+  tool_audit:

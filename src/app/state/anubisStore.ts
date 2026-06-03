@@ -1,14 +1,7 @@
 import { create } from "zustand";
-import {
-  ChatMessage,
-  PluginManifest,
-  RuntimeHealth,
-  getRuntimeHealth,
-  listPlugins,
-} from "../core/api";
-import { AgentMemory, AnubisAgentV2, RagDocument } from "../core/agent";
-import { createVaultRagRetriever } from "../core/rag";
-import type { ModuleRuntimeState } from "../core/modules/moduleTypes";
+import { ChatMessage } from "../core/api";
+import { AnubisAgentV2 } from "../core/agent";
+import { AnubisMemory } from "../core/memory";
 
 export type AnubisView = "chat" | "vault" | "tools" | "plugins" | "settings";
 
@@ -16,92 +9,50 @@ const initialMessages: ChatMessage[] = [
   {
     id: crypto.randomUUID(),
     role: "assistant",
-    content: "ANUBIS runtime ready. Ask me to reason over the local vault, inspect a project, or route work through a plugin.",
+    content: "ANUBIS MVP ready. Make sure Ollama is running qwen2.5-coder:7b, then send a message.",
     createdAt: new Date().toISOString(),
   },
 ];
 
-const initialModuleRuntime: ModuleRuntimeState = {
-  chatActions: [],
-  commands: [],
-  loaded: [],
-  tools: [],
-};
-
-const agentMemory = new AgentMemory({
-  maxMessages: 8,
-  maxMemoryChars: 6000,
-  summarize: (messages) =>
-    messages
-      .map((message) => `${message.role}: ${message.content}`)
-      .join("\n")
-      .slice(0, 1200),
-});
+let activeAbortController: AbortController | null = null;
+const memory = new AnubisMemory();
 
 type AnubisState = {
   activeView: AnubisView;
-  busy: boolean;
-  health: RuntimeHealth;
+  currentStream: string;
   input: string;
+  loading: boolean;
   messages: ChatMessage[];
-  moduleRuntime: ModuleRuntimeState;
-  paletteOpen: boolean;
-  pluginOverrides: Record<string, boolean>;
-  plugins: PluginManifest[];
 
-  appendSystemNote: (content: string) => void;
-  closePalette: () => void;
-  openPalette: () => void;
-  refreshRuntime: () => Promise<void>;
+  abortAgent: () => void;
   runAgent: (prompt?: string) => Promise<void>;
   setActiveView: (view: AnubisView) => void;
   setInput: (input: string) => void;
-  setModuleRuntime: (runtime: ModuleRuntimeState) => void;
-  togglePalette: () => void;
-  togglePlugin: (pluginName: string) => void;
 };
 
 export const useAnubisStore = create<AnubisState>((set, get) => ({
   activeView: "chat",
-  busy: false,
-  health: { status: "offline", apiUrl: "http://127.0.0.1:8000" },
+  currentStream: "",
   input: "",
+  loading: false,
   messages: initialMessages,
-  moduleRuntime: initialModuleRuntime,
-  paletteOpen: false,
-  pluginOverrides: {},
-  plugins: [],
 
-  appendSystemNote(content) {
-    set((state) => ({
-      messages: [...state.messages, createMessage("system", content)],
-    }));
-  },
-
-  closePalette() {
-    set({ paletteOpen: false });
-  },
-
-  openPalette() {
-    set({ paletteOpen: true });
-  },
-
-  async refreshRuntime() {
-    const [health, plugins] = await Promise.all([getRuntimeHealth(), listPlugins().catch(() => [])]);
-    set({ health, plugins });
+  abortAgent() {
+    activeAbortController?.abort();
   },
 
   async runAgent(prompt) {
     const state = get();
     const nextPrompt = (prompt ?? state.input).trim();
-    if (!nextPrompt || state.busy) {
+    if (!nextPrompt || state.loading) {
       return;
     }
 
     const assistantId = crypto.randomUUID();
     set((current) => ({
-      busy: true,
+      currentStream: "",
       input: "",
+      loading: true,
       messages: [
         ...current.messages,
         createMessage("user", nextPrompt),
@@ -114,47 +65,43 @@ export const useAnubisStore = create<AnubisState>((set, get) => ({
       ],
     }));
 
+    activeAbortController = new AbortController();
+    const stream = createStreamBatcher(set, assistantId);
+
     try {
-      const agent = new AnubisAgentV2({
-        memory: agentMemory,
-        ragDocuments: buildRagDocuments(get()),
-        retrieveRag: createVaultRagRetriever({
-          vaultPath: "vault",
-          maxBytes: 4096,
-          maxMatches: 4,
-        }),
-      });
+      const agent = new AnubisAgentV2({ memory });
 
       await agent.run(nextPrompt, {
         onText(text) {
-          set((current) => ({
-            messages: updateMessage(current.messages, assistantId, text),
-          }));
+          stream.schedule(text);
         },
         onToolCall(call) {
           set((current) => ({
-            messages: [
-              ...current.messages,
-              createMessage("system", `Tool requested: ${call.name}`),
-            ],
+            messages: [...current.messages, createMessage("system", `Tool requested: ${call.name}`)],
           }));
         },
         onToolResult(result) {
           set((current) => ({
             messages: [
               ...current.messages,
-              createMessage("system", `Tool completed: ${result.tool}`),
+              createMessage(
+                "system",
+                `Tool ${result.status === "ok" ? "completed" : "blocked"}: ${result.tool}`,
+              ),
             ],
           }));
         },
-      });
+      }, activeAbortController.signal);
     } catch (error) {
       const message = error instanceof Error ? error.message : "Unknown runtime error";
       set((current) => ({
+        currentStream: message,
         messages: updateMessage(current.messages, assistantId, `Runtime error: ${message}`),
       }));
     } finally {
-      set({ busy: false });
+      stream.flush();
+      activeAbortController = null;
+      set({ currentStream: "", loading: false });
     }
   },
 
@@ -165,36 +112,7 @@ export const useAnubisStore = create<AnubisState>((set, get) => ({
   setInput(input) {
     set({ input });
   },
-
-  setModuleRuntime(runtime) {
-    set({ moduleRuntime: runtime });
-  },
-
-  togglePalette() {
-    set((state) => ({ paletteOpen: !state.paletteOpen }));
-  },
-
-  togglePlugin(pluginName) {
-    const state = get();
-    const plugin = state.plugins.find((item) => item.name === pluginName);
-    const nextEnabled = !(state.pluginOverrides[pluginName] ?? plugin?.enabled ?? true);
-
-    set((current) => ({
-      pluginOverrides: { ...current.pluginOverrides, [pluginName]: nextEnabled },
-      messages: [
-        ...current.messages,
-        createMessage("system", `${plugin?.displayName ?? pluginName} ${nextEnabled ? "enabled" : "disabled"}.`),
-      ],
-    }));
-  },
 }));
-
-export function selectEffectivePlugins(state: Pick<AnubisState, "plugins" | "pluginOverrides">) {
-  return state.plugins.map((plugin) => ({
-    ...plugin,
-    enabled: state.pluginOverrides[plugin.name] ?? plugin.enabled,
-  }));
-}
 
 function createMessage(role: ChatMessage["role"], content: string): ChatMessage {
   return {
@@ -209,29 +127,45 @@ function updateMessage(messages: ChatMessage[], id: string, content: string): Ch
   return messages.map((message) => (message.id === id ? { ...message, content } : message));
 }
 
-function buildRagDocuments(state: AnubisState): RagDocument[] {
-  const effectivePlugins = selectEffectivePlugins(state).filter((plugin) => plugin.enabled);
-  const pluginDocs = effectivePlugins.map((plugin) => ({
-    id: `plugin:${plugin.name}`,
-    title: plugin.displayName,
-    path: plugin.source,
-    keywords: [plugin.name, plugin.displayName, ...plugin.triggers],
-    text: [
-      plugin.displayName,
-      plugin.description,
-      plugin.triggers.join(" "),
-      plugin.permissions?.join(" ") ?? "",
-    ]
-      .filter(Boolean)
-      .join("\n"),
-  }));
+type AnubisSetter = (updater: (state: AnubisState) => Partial<AnubisState>) => void;
 
-  const commandDocs = state.moduleRuntime.commands.map((command) => ({
-    id: `command:${command.id}`,
-    title: command.label,
-    keywords: [command.id, command.group, ...(command.keywords ?? [])],
-    text: [command.label, command.description, command.group, ...(command.keywords ?? [])].join("\n"),
-  }));
+function createStreamBatcher(set: AnubisSetter, assistantId: string) {
+  let latestText = "";
+  let scheduled = false;
+  let frameId: number | null = null;
 
-  return [...pluginDocs, ...commandDocs];
+  function apply() {
+    scheduled = false;
+    frameId = null;
+    set((current) => ({
+      currentStream: latestText,
+      messages: updateMessage(current.messages, assistantId, latestText),
+    }));
+  }
+
+  return {
+    schedule(text: string) {
+      latestText = text;
+      if (scheduled) {
+        return;
+      }
+
+      scheduled = true;
+      if (typeof window !== "undefined" && "requestAnimationFrame" in window) {
+        frameId = window.requestAnimationFrame(apply);
+      } else {
+        globalThis.setTimeout(apply, 16);
+      }
+    },
+    flush() {
+      if (!scheduled) {
+        return;
+      }
+
+      if (frameId !== null && typeof window !== "undefined") {
+        window.cancelAnimationFrame(frameId);
+      }
+      apply();
+    },
+  };
 }

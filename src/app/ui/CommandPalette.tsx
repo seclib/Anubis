@@ -1,4 +1,4 @@
-import { KeyboardEvent, useEffect, useMemo, useRef, useState } from "react";
+import { KeyboardEvent, memo, RefObject, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Command, FileText, Settings2, TerminalSquare } from "lucide-react";
 import { resolveCommands } from "../core/commands/fuzzy";
 import type { CommandActionHelpers, CommandContext, CommandDefinition, ResolvedCommand } from "../core/commands/types";
@@ -11,14 +11,14 @@ type CommandPaletteProps = {
   onClose: () => void;
 };
 
-export function CommandPalette({ open, commands, context, helpers, onClose }: CommandPaletteProps) {
+export const CommandPalette = memo(function CommandPalette({ open, commands, context, helpers, onClose }: CommandPaletteProps) {
   const [query, setQuery] = useState("");
   const [activeIndex, setActiveIndex] = useState(0);
   const inputRef = useRef<HTMLInputElement>(null);
   const activeItemRef = useRef<HTMLButtonElement>(null);
 
   const results = useMemo(() => resolveCommands(commands, context, query), [commands, context, query]);
-  const executableResults = results.filter((command) => command.enabled);
+  const executableResults = useMemo(() => results.filter((command) => command.enabled), [results]);
 
   useEffect(() => {
     if (!open) {
@@ -42,11 +42,7 @@ export function CommandPalette({ open, commands, context, helpers, onClose }: Co
     activeItemRef.current?.scrollIntoView({ block: "nearest" });
   }, [activeIndex]);
 
-  if (!open) {
-    return null;
-  }
-
-  async function execute(command: ResolvedCommand | undefined) {
+  const execute = useCallback(async (command: ResolvedCommand | undefined) => {
     if (!command || !command.enabled) {
       return;
     }
@@ -55,6 +51,10 @@ export function CommandPalette({ open, commands, context, helpers, onClose }: Co
     setQuery("");
     setActiveIndex(0);
     await command.action(helpers, context);
+  }, [context, helpers, onClose]);
+
+  if (!open) {
+    return null;
   }
 
   function onPaletteKeyDown(event: KeyboardEvent<HTMLInputElement>) {
@@ -111,26 +111,15 @@ export function CommandPalette({ open, commands, context, helpers, onClose }: Co
         </div>
         <div className="palette-list" role="listbox">
           {results.map((command, index) => (
-            <button
-              id={command.id}
-              ref={index === activeIndex ? activeItemRef : undefined}
-              className={index === activeIndex ? "active" : ""}
-              type="button"
-              role="option"
-              aria-selected={index === activeIndex}
-              aria-disabled={!command.enabled}
-              disabled={!command.enabled}
+            <CommandPaletteItem
+              active={index === activeIndex}
+              activeItemRef={activeItemRef}
+              command={command}
+              index={index}
               key={command.id}
-              onMouseEnter={() => setActiveIndex(index)}
-              onClick={() => void execute(command)}
-            >
-              {command.icon}
-              <span>
-                <strong>{command.label}</strong>
-                <small>{command.enabled ? command.description : command.disabledReason}</small>
-              </span>
-              <em>{command.group}</em>
-            </button>
+              onExecute={execute}
+              onFocusIndex={setActiveIndex}
+            />
           ))}
           {!results.length && <div className="empty-state">No matching command</div>}
         </div>
@@ -142,4 +131,44 @@ export function CommandPalette({ open, commands, context, helpers, onClose }: Co
       </section>
     </div>
   );
-}
+});
+
+type CommandPaletteItemProps = {
+  active: boolean;
+  activeItemRef: RefObject<HTMLButtonElement>;
+  command: ResolvedCommand;
+  index: number;
+  onExecute: (command: ResolvedCommand | undefined) => Promise<void>;
+  onFocusIndex: (index: number) => void;
+};
+
+const CommandPaletteItem = memo(function CommandPaletteItem({
+  active,
+  activeItemRef,
+  command,
+  index,
+  onExecute,
+  onFocusIndex,
+}: CommandPaletteItemProps) {
+  return (
+    <button
+      id={command.id}
+      ref={active ? activeItemRef : undefined}
+      className={active ? "active" : ""}
+      type="button"
+      role="option"
+      aria-selected={active}
+      aria-disabled={!command.enabled}
+      disabled={!command.enabled}
+      onMouseEnter={() => onFocusIndex(index)}
+      onClick={() => void onExecute(command)}
+    >
+      {command.icon}
+      <span>
+        <strong>{command.label}</strong>
+        <small>{command.enabled ? command.description : command.disabledReason}</small>
+      </span>
+      <em>{command.group}</em>
+    </button>
+  );
+});

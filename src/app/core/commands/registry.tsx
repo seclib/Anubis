@@ -1,8 +1,10 @@
 import {
   Bot,
+  Box,
   FileSearch,
   FileText,
   GitCommit,
+  MessageSquareText,
   Plug,
   Search,
   Settings2,
@@ -37,6 +39,54 @@ const hasPlugins: CommandRequirement = {
 
 export function buildCommandRegistry(plugins: PluginManifest[]): CommandDefinition[] {
   return [
+    {
+      id: "nav.chat",
+      label: "Open Chat",
+      description: "Switch to the streaming chat view",
+      group: "Core",
+      keywords: ["navigation", "conversation", "assistant"],
+      icon: <MessageSquareText size={16} />,
+      action: (helpers) => {
+        helpers.setActiveView("chat");
+        helpers.focusChat();
+      },
+    },
+    {
+      id: "nav.vault",
+      label: "Open Vault",
+      description: "Switch to local vault and file context",
+      group: "Project",
+      keywords: ["navigation", "files", "memory", "notes"],
+      icon: <FileSearch size={16} />,
+      action: (helpers) => helpers.setActiveView("vault"),
+    },
+    {
+      id: "nav.tools",
+      label: "Open Tools",
+      description: "Switch to validated tools and runtime utilities",
+      group: "Tools",
+      keywords: ["navigation", "tool router", "shell"],
+      icon: <Box size={16} />,
+      action: (helpers) => helpers.setActiveView("tools"),
+    },
+    {
+      id: "nav.plugins",
+      label: "Open Plugins",
+      description: "Switch to installed plugins and modules",
+      group: "Plugins",
+      keywords: ["navigation", "extensions", "modules"],
+      icon: <Plug size={16} />,
+      action: (helpers) => helpers.setActiveView("plugins"),
+    },
+    {
+      id: "nav.settings",
+      label: "Open Settings",
+      description: "Switch to runtime and interface settings",
+      group: "Core",
+      keywords: ["navigation", "preferences", "config"],
+      icon: <Settings2 size={16} />,
+      action: (helpers) => helpers.setActiveView("settings"),
+    },
     {
       id: "core.run-agent",
       label: "Run Agent",
@@ -73,6 +123,25 @@ export function buildCommandRegistry(plugins: PluginManifest[]): CommandDefiniti
       action: (helpers) => {
         helpers.setPrompt("/context ");
         helpers.focusChat();
+      },
+    },
+    {
+      id: "core.file-search",
+      label: "Find Files",
+      description: "Search project and vault files through the sandboxed tool router",
+      group: "Project",
+      keywords: ["find", "file search", "search files", "grep", "rg", "/search"],
+      icon: <FileSearch size={16} />,
+      requirements: [projectOpen],
+      action: async (helpers, context) => {
+        const query = context.input.trim();
+        if (!query) {
+          helpers.setPrompt("/search ");
+          helpers.focusChat();
+          return;
+        }
+
+        await helpers.searchFiles(query);
       },
     },
     {
@@ -124,7 +193,7 @@ export function buildCommandRegistry(plugins: PluginManifest[]): CommandDefiniti
       keywords: ["preferences", "config"],
       icon: <Settings2 size={16} />,
       action: (helpers) => {
-        helpers.appendSystemNote("Settings command selected.");
+        helpers.setActiveView("settings");
       },
     },
     ...plugins.map(pluginCommand),

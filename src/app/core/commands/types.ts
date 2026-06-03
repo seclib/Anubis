@@ -1,5 +1,6 @@
 import type { ReactNode } from "react";
 import type { PluginManifest, RuntimeHealth } from "../api";
+import type { AnubisView } from "../../state/anubisStore";
 
 export type CommandContext = {
   runtimeHealth: RuntimeHealth;
@@ -21,6 +22,8 @@ export type CommandActionHelpers = {
   focusChat: () => void;
   refreshRuntime: () => Promise<void>;
   runAgent: (prompt?: string) => Promise<void>;
+  searchFiles: (query: string) => Promise<void>;
+  setActiveView: (view: AnubisView) => void;
   setPrompt: (value: string) => void;
   togglePlugin: (pluginName: string) => void;
 };

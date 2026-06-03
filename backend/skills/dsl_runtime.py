@@ -52,6 +52,9 @@ class SkillResult:
     trace: tuple[StepTrace, ...]
     variables: dict[str, Any]
 
+    def log(self) -> list[dict[str, Any]]:
+        return [trace.__dict__ for trace in self.trace]
+
 
 class DslRuntimeError(RuntimeError):
     pass
@@ -105,6 +108,12 @@ class ToolDispatcher:
         if tool is None:
             raise DslRuntimeError(f"tool not registered: {name}")
         return tool(**dict(args))
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "allowed": sorted(self.allowed),
+            "registered": sorted(self.tools),
+        }
 
 
 class DslRuntime:
@@ -163,6 +172,15 @@ class DslRuntime:
             index += 1
 
         return SkillResult(True, parsed.name, variables.get("result"), tuple(trace), variables)
+
+    def snapshot(self) -> dict[str, Any]:
+        return {
+            "actions": sorted(ALLOWED_ACTIONS),
+            "tools": self.dispatcher.snapshot(),
+            "max_steps": self.max_steps,
+            "deterministic": True,
+            "arbitrary_code_execution": False,
+        }
 
     def _safe_step(self, step: DslStep, variables: dict[str, Any]) -> tuple[bool, Any, str]:
         try:
@@ -370,5 +388,6 @@ __all__ = [
     "StepTrace",
     "ToolDispatcher",
     "parse_skill",
+    "parse_step",
     "validate_skill",
 ]

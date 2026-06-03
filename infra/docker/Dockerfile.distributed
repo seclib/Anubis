@@ -1,0 +1,47 @@
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.12-slim AS base
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/opt/anubis \
+    ANUBIS_ENV=production \
+    ANUBIS_HEALTH_HOST=0.0.0.0 \
+    ANUBIS_HEALTH_PORT=8080
+
+WORKDIR /opt/anubis
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git curl openssh-client \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /usr/sbin/nologin anubis
+
+COPY requirements.txt pyproject.toml ./
+RUN python -m pip install --upgrade pip \
+    && python -m pip install -r requirements.txt
+
+COPY anubis ./anubis
+COPY backend ./backend
+COPY runtime ./runtime
+COPY memory ./memory
+COPY retrieval ./retrieval
+COPY rag ./rag
+COPY storage ./storage
+COPY tools ./tools
+COPY services ./services
+COPY workers ./workers
+COPY config.py main.py ./
+
+RUN mkdir -p /workspace/repos /workspace/sandbox /var/lib/anubis /var/log/anubis \
+    && chown -R anubis:anubis /opt/anubis /workspace /var/lib/anubis /var/log/anubis
+
+USER anubis
+
+EXPOSE 8080
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8080/health', timeout=2).read()"
+
+ENTRYPOINT ["python", "-m", "anubis.distributed.service_entrypoint"]
+CMD ["--role", "company-runtime"]

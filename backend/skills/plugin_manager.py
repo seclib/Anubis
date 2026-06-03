@@ -1,8 +1,9 @@
 from __future__ import annotations
+
 from dataclasses import dataclass, field, replace
-from pathlib import Path
 import json
 import os
+from pathlib import Path
 import re
 import time
 from typing import Any
@@ -16,35 +17,16 @@ PLUGIN_MANIFEST_SCHEMA: dict[str, Any] = {
     "required": ["name", "triggers", "skills"],
     "additionalProperties": True,
     "properties": {
-        "name": {
-            "type": "string",
-            "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{1,63}$",
-            "description": "Stable plugin identifier.",
-        },
+        "name": {"type": "string", "pattern": "^[a-zA-Z0-9][a-zA-Z0-9_.-]{1,63}$"},
         "display_name": {"type": "string"},
         "version": {"type": "string"},
         "description": {"type": "string"},
         "enabled": {"type": "boolean", "default": True},
-        "triggers": {
-            "type": "array",
-            "minItems": 1,
-            "items": {"type": "string", "minLength": 1},
-            "description": "Literal trigger phrases or regex strings wrapped in /slashes/.",
-        },
-        "skills": {
-            "type": "array",
-            "minItems": 1,
-            "items": {"type": "string", "minLength": 1},
-            "description": "Markdown files or directories under /skills/ to load as skill context.",
-        },
-        "activation_events": {
-            "type": "array",
-            "items": {"type": "string"},
-            "description": "Optional VS Code-style activation labels.",
-        },
+        "triggers": {"type": "array", "items": {"type": "string"}},
+        "skills": {"type": "array", "items": {"type": "string"}},
+        "activation_events": {"type": "array", "items": {"type": "string"}},
         "memory": {
             "type": "object",
-            "additionalProperties": False,
             "properties": {
                 "obsidian": {"type": "array", "items": {"type": "string"}},
                 "qdrant": {"type": "array", "items": {"type": "string"}},
@@ -63,12 +45,21 @@ PLUGIN_MANIFEST_SCHEMA: dict[str, Any] = {
 }
 
 
+class PluginError(ValueError):
+    pass
+
+
+PluginFormatError = PluginError
+
+
 @dataclass(frozen=True)
 class MemoryBinding:
     kind: str
     namespace: str
     source: str
     metadata: dict[str, Any] = field(default_factory=dict)
+
+
 @dataclass(frozen=True)
 class PluginSpec:
     name: str
@@ -108,12 +99,7 @@ class RouteMatch:
     score: float
 
     def as_dict(self) -> dict[str, Any]:
-        return {
-            "plugin": self.plugin,
-            "trigger": self.trigger,
-            "kind": self.kind,
-            "score": self.score,
-        }
+        return {"plugin": self.plugin, "trigger": self.trigger, "kind": self.kind, "score": self.score}
 
 
 @dataclass
@@ -122,6 +108,7 @@ class ActivePlugin:
     skill_context: tuple[str, ...]
     memory: tuple[MemoryBinding, ...]
     loaded_at: float = field(default_factory=time.time)
+
     def context(self) -> dict[str, Any]:
         return {
             "plugin": self.spec.name,
@@ -132,13 +119,6 @@ class ActivePlugin:
         }
 
 
-class PluginError(ValueError):
-    pass
-
-
-PluginFormatError = PluginError
-
-
 class TriggerRouter:
     def __init__(self) -> None:
         self.routes: dict[str, tuple[tuple[str, str, re.Pattern[str]], ...]] = {}
@@ -147,7 +127,7 @@ class TriggerRouter:
         self.routes.clear()
 
     def register(self, plugin: PluginSpec) -> None:
-        self.routes[plugin.name] = tuple(self._compile(item) for item in plugin.triggers if item.strip())
+        self.routes[plugin.name] = tuple(self._compile(trigger) for trigger in plugin.triggers if trigger.strip())
 
     def unregister(self, name: str) -> None:
         self.routes.pop(name, None)
@@ -157,38 +137,33 @@ class TriggerRouter:
 
     def route(self, query: str) -> tuple[RouteMatch, ...]:
         matches: list[RouteMatch] = []
-        for name, patterns in self.routes.items():
+        for name, routes in self.routes.items():
             best: RouteMatch | None = None
-            for raw, kind, pattern in patterns:
+            for raw, kind, pattern in routes:
                 found = pattern.search(query)
-                if not found:
+                if found is None:
                     continue
-                score = self._score(query, found, kind)
+                coverage = (found.end() - found.start()) / max(len(query), 1)
+                score = round(min(1.0, (0.65 if kind == "regex" else 0.75) + coverage), 6)
                 candidate = RouteMatch(name, raw, kind, score)
                 if best is None or candidate.score > best.score:
                     best = candidate
             if best is not None:
                 matches.append(best)
-        matches.sort(key=lambda item: (item.score, item.plugin), reverse=True)
-        return tuple(matches)
+        return tuple(sorted(matches, key=lambda item: (item.score, item.plugin), reverse=True))
 
     def _compile(self, trigger: str) -> tuple[str, str, re.Pattern[str]]:
         trigger = trigger.strip()
         if trigger.startswith("/") and trigger.endswith("/") and len(trigger) > 2:
             return trigger, "regex", re.compile(trigger[1:-1], re.IGNORECASE)
         words = re.findall(r"[a-zA-Z0-9_+#.-]+", trigger)
-        pattern = r".*".join(map(re.escape, words)) if words else re.escape(trigger)
-        return trigger, "phrase", re.compile(pattern, re.IGNORECASE)
-
-    def _score(self, query: str, match: re.Match[str], kind: str) -> float:
-        coverage = (match.end() - match.start()) / max(len(query), 1)
-        base = 0.65 if kind == "regex" else 0.75
-        return round(min(1.0, base + coverage), 6)
+        return trigger, "phrase", re.compile(r".*".join(map(re.escape, words)) or re.escape(trigger), re.IGNORECASE)
 
 
 class MemoryBinder:
     def __init__(self, vault_path: Path | None = None, qdrant_collection: str | None = None) -> None:
-        self.vault_path = vault_path or Path(os.getenv("ANUBIS_VAULT_PATH", os.getenv("OBSIDIAN_VAULT_PATH", "vault")))
+        vault = os.getenv("ANUBIS_VAULT_PATH", os.getenv("OBSIDIAN_VAULT_PATH", "vault"))
+        self.vault_path = Path(vault_path or vault)
         self.qdrant_collection = qdrant_collection or os.getenv("QDRANT_COLLECTION", "anubis_chunks")
 
     def bind(self, plugin: PluginSpec) -> tuple[MemoryBinding, ...]:
@@ -197,8 +172,8 @@ class MemoryBinder:
             source = _inside(self.vault_path, Path(namespace))
             bindings.append(MemoryBinding("obsidian", namespace, source.as_posix(), {"vault": self.vault_path.as_posix()}))
         for namespace in plugin.qdrant:
-            meta = {"collection": self.qdrant_collection, "filter": {"namespace": namespace}}
-            bindings.append(MemoryBinding("qdrant", namespace, self.qdrant_collection, meta))
+            metadata = {"collection": self.qdrant_collection, "filter": {"namespace": namespace}}
+            bindings.append(MemoryBinding("qdrant", namespace, self.qdrant_collection, metadata))
         return tuple(bindings)
 
 
@@ -209,20 +184,18 @@ class PluginLoader:
     def discover(self) -> tuple[Path, ...]:
         if not self.root.exists():
             return ()
-        manifests = {*self.root.glob("*.plugin.json"), *self.root.glob("*/plugin.json")}
-        return tuple(sorted(manifests))
+        return tuple(sorted({*self.root.glob("*.plugin.json"), *self.root.glob("*/plugin.json")}))
 
     def parse(self, path: Path) -> PluginSpec:
         raw = json.loads(path.read_text(encoding="utf-8"))
         self.validate_manifest(raw, path)
-        memory = raw.get("memory", {})
-        name = str(raw.get("name") or path.name.removesuffix(".plugin.json")).strip()
-        triggers = _strings(raw.get("triggers", ()))
+        memory = raw.get("memory") or {}
+        name = str(raw["name"]).strip()
         return PluginSpec(
             name=name,
             path=path,
-            triggers=triggers,
-            skills=_strings(raw.get("skills", (name,))),
+            triggers=_strings(raw["triggers"]),
+            skills=_strings(raw["skills"]),
             display_name=str(raw.get("display_name") or raw.get("displayName") or name),
             version=str(raw.get("version") or "0.0.0"),
             description=str(raw.get("description") or ""),
@@ -234,47 +207,29 @@ class PluginLoader:
         )
 
     def validate_manifest(self, raw: Any, path: Path | None = None) -> None:
-        location = str(path or "plugin manifest")
+        label = str(path or "plugin manifest")
         if not isinstance(raw, dict):
-            raise PluginError(f"{location} must contain a JSON object")
+            raise PluginError(f"{label} must contain a JSON object")
         missing = {"name", "triggers", "skills"} - set(raw)
         if missing:
-            raise PluginError(f"{location} missing required keys: {', '.join(sorted(missing))}")
-        name = str(raw.get("name") or "")
-        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{1,63}$", name):
-            raise PluginError(f"{location} name must be a safe plugin id")
-        if not _strings(raw.get("triggers")):
-            raise PluginError(f"{location} requires at least one trigger")
-        if not _strings(raw.get("skills")):
-            raise PluginError(f"{location} requires at least one skill path")
-        memory = raw.get("memory", {})
-        if memory is not None and not isinstance(memory, dict):
-            raise PluginError(f"{location} memory must be an object")
-        permissions = raw.get("permissions", {})
-        if permissions is not None and not isinstance(permissions, dict):
-            raise PluginError(f"{location} permissions must be an object")
+            raise PluginError(f"{label} missing required keys: {', '.join(sorted(missing))}")
+        if not re.match(r"^[a-zA-Z0-9][a-zA-Z0-9_.-]{1,63}$", str(raw["name"])):
+            raise PluginError(f"{label} name must be a safe plugin id")
+        if not _strings(raw["triggers"]) or not _strings(raw["skills"]):
+            raise PluginError(f"{label} requires at least one trigger and one skill")
+        if raw.get("memory") is not None and not isinstance(raw["memory"], dict):
+            raise PluginError(f"{label} memory must be an object")
+        if raw.get("permissions") is not None and not isinstance(raw["permissions"], dict):
+            raise PluginError(f"{label} permissions must be an object")
 
     def load_skills(self, plugin: PluginSpec) -> tuple[str, ...]:
         contexts: list[str] = []
         for entry in plugin.skills:
             base = _inside(self.root, Path(entry))
-            paths = sorted(base.rglob("*.md")) if base.is_dir() else [base]
-            for path in paths:
+            for path in sorted(base.rglob("*.md")) if base.is_dir() else [base]:
                 if path.suffix == ".md":
                     contexts.append(_skill_context(path.relative_to(self.root).as_posix(), path.read_text(encoding="utf-8")))
         return tuple(contexts)
-
-
-class PluginRegistry:
-    def __init__(self) -> None:
-        self.specs: dict[str, PluginSpec] = {}
-        self.active: dict[str, ActivePlugin] = {}
-        self.disabled: set[str] = set()
-        self.mtimes: dict[Path, float] = {}
-
-    def set_specs(self, specs: tuple[PluginSpec, ...]) -> None:
-        self.specs = {spec.name: replace(spec, enabled=False) if spec.name in self.disabled else spec for spec in specs}
-        self.mtimes.update({spec.path: spec.path.stat().st_mtime for spec in specs})
 
 
 class PluginManager:
@@ -282,69 +237,92 @@ class PluginManager:
         self.loader = PluginLoader(root)
         self.router = TriggerRouter()
         self.memory = MemoryBinder(vault_path, qdrant_collection)
-        self.registry = PluginRegistry()
+        self.specs: dict[str, PluginSpec] = {}
+        self.active_plugins: dict[str, ActivePlugin] = {}
+        self.disabled: set[str] = set()
+        self.mtimes: dict[Path, float] = {}
 
     def discover(self) -> dict[str, PluginSpec]:
-        specs = tuple(self.loader.parse(path) for path in self.loader.discover())
-        self.registry.set_specs(specs)
+        self.specs = {}
+        self.mtimes = {}
+        for spec in (self.loader.parse(path) for path in self.loader.discover()):
+            self.specs[spec.name] = replace(spec, enabled=False) if spec.name in self.disabled else spec
+            self.mtimes[spec.path] = spec.path.stat().st_mtime
         self._rebuild_routes()
-        return self.registry.specs
+        return self.specs
 
     def list_plugins(self) -> list[dict[str, Any]]:
-        if not self.registry.specs:
+        if not self.specs:
             self.discover()
         return [
-            {
-                **spec.manifest(),
-                "active": name in self.registry.active,
-                "enabled": spec.enabled and name not in self.registry.disabled,
-            }
-            for name, spec in sorted(self.registry.specs.items())
+            {**spec.manifest(), "active": name in self.active_plugins, "enabled": self.enabled(name)}
+            for name, spec in sorted(self.specs.items())
         ]
 
     def load(self, name: str) -> ActivePlugin:
         spec = self._spec(name)
-        if not spec.enabled or name in self.registry.disabled:
+        if not self.enabled(name):
             raise PluginError(f"plugin disabled: {name}")
         plugin = ActivePlugin(spec, self.loader.load_skills(spec), self.memory.bind(spec))
-        self.registry.active[name] = plugin
+        self.active_plugins[name] = plugin
         return plugin
 
     def unload(self, name: str) -> None:
-        self.registry.active.pop(name, None)
+        self.active_plugins.pop(name, None)
 
     def enable(self, name: str) -> ActivePlugin:
-        self.registry.disabled.discard(name)
-        spec = replace(self._spec(name), enabled=True)
-        self.registry.specs[name] = spec
-        self.router.register(spec)
+        self.disabled.discard(name)
+        self.specs[name] = replace(self._spec(name), enabled=True)
+        self.router.register(self.specs[name])
         return self.load(name)
 
     def disable(self, name: str) -> None:
-        self.registry.disabled.add(name)
+        self.disabled.add(name)
         self.unload(name)
         self.router.unregister(name)
-        if name in self.registry.specs:
-            self.registry.specs[name] = replace(self.registry.specs[name], enabled=False)
+        if name in self.specs:
+            self.specs[name] = replace(self.specs[name], enabled=False)
+
+    def enabled(self, name: str) -> bool:
+        spec = self._spec(name)
+        return spec.enabled and name not in self.disabled
+
+    def active(self, name: str) -> bool:
+        return name in self.active_plugins
+
+    def bindings(self, name: str) -> tuple[MemoryBinding, ...]:
+        plugin = self.active_plugins.get(name)
+        if plugin is None:
+            plugin = self.load(name)
+        return plugin.memory
 
     def hot_reload(self) -> tuple[str, ...]:
-        if not self.registry.specs:
+        if not self.specs:
             self.discover()
             return ()
+        current = {spec.name: spec for spec in (self.loader.parse(path) for path in self.loader.discover())}
         changed: list[str] = []
-        for name, spec in list(self.registry.specs.items()):
+        for name in tuple(self.specs):
+            if name not in current:
+                self.disable(name)
+                self.specs.pop(name, None)
+                changed.append(name)
+        for name, spec in current.items():
             mtime = spec.path.stat().st_mtime
-            if mtime == self.registry.mtimes.get(spec.path):
+            if name in self.specs and self.mtimes.get(spec.path) == mtime:
                 continue
-            self.registry.mtimes[spec.path] = mtime
-            self.registry.specs[name] = self.loader.parse(spec.path)
+            self.specs[name] = replace(spec, enabled=False) if name in self.disabled else spec
+            self.mtimes[spec.path] = mtime
             self.router.unregister(name)
-            if name not in self.registry.disabled and self.registry.specs[name].enabled:
-                self.router.register(self.registry.specs[name])
-                if name in self.registry.active:
+            if self.enabled(name):
+                self.router.register(self.specs[name])
+                if name in self.active_plugins:
                     self.load(name)
             changed.append(name)
+        self.mtimes = {path: mtime for path, mtime in self.mtimes.items() if path.exists()}
         return tuple(changed)
+
+    reload = hot_reload
 
     def route(self, query: str) -> list[dict[str, Any]]:
         self.hot_reload()
@@ -352,36 +330,40 @@ class PluginManager:
 
     def resolve(self, query: str) -> dict[str, Any]:
         self.hot_reload()
-        route_matches = self.router.route(query)
-        active = [
-            self.registry.active[match.plugin] if match.plugin in self.registry.active else self.load(match.plugin)
-            for match in route_matches
-        ]
+        matches = self.router.route(query)
+        active = [self.active_plugins.get(match.plugin) or self.load(match.plugin) for match in matches]
         return {
             "query": query,
-            "matches": tuple(match.plugin for match in route_matches),
-            "routes": [match.as_dict() for match in route_matches],
+            "matches": tuple(match.plugin for match in matches),
+            "routes": [match.as_dict() for match in matches],
             "active_context": [plugin.context() for plugin in active],
         }
 
+    def registry_snapshot(self) -> dict[str, Any]:
+        return {
+            "plugins": self.list_plugins(),
+            "routes": {name: [raw for raw, _kind, _pattern in routes] for name, routes in sorted(self.router.routes.items())},
+            "active": sorted(self.active_plugins),
+            "disabled": sorted(self.disabled),
+        }
+
     def _spec(self, name: str) -> PluginSpec:
-        if not self.registry.specs:
+        if not self.specs:
             self.discover()
-        if name not in self.registry.specs:
+        if name not in self.specs:
             raise PluginError(f"unknown plugin: {name}")
-        return self.registry.specs[name]
+        return self.specs[name]
 
     def _rebuild_routes(self) -> None:
         self.router.clear()
-        for spec in self.registry.specs.values():
-            if spec.enabled and spec.name not in self.registry.disabled:
+        for spec in self.specs.values():
+            if spec.enabled and spec.name not in self.disabled:
                 self.router.register(spec)
 
 
 def _strings(value: Any) -> tuple[str, ...]:
     if isinstance(value, str):
-        stripped = value.strip()
-        return (stripped,) if stripped else ()
+        return (value.strip(),) if value.strip() else ()
     if isinstance(value, (list, tuple)):
         return tuple(str(item).strip() for item in value if str(item).strip())
     return ()
@@ -389,21 +371,21 @@ def _strings(value: Any) -> tuple[str, ...]:
 
 def _inside(root: Path, candidate: Path) -> Path:
     base = root.resolve()
-    resolved = (root / candidate).resolve() if not candidate.is_absolute() else candidate.resolve()
+    resolved = candidate.resolve() if candidate.is_absolute() else (base / candidate).resolve()
     if base != resolved and base not in resolved.parents:
         raise ValueError(f"path escapes root: {candidate}")
     return resolved
 
 
 def _skill_context(path: str, markdown: str) -> str:
-    body = re.sub(r"\A---\n.*?\n---\n?", "", markdown, flags=re.DOTALL)
-    name = Path(path).stem
+    body = re.sub(r"\A---\n.*?\n---\n?", "", markdown, flags=re.DOTALL).strip()
+    title = Path(path).stem
     for line in body.splitlines():
         if line.strip().startswith("#"):
             title = line.strip().lstrip("#").strip()
-            name = title.split(":", 1)[1].strip() if title.lower().startswith("skill:") else title
+            title = title.split(":", 1)[1].strip() if title.lower().startswith("skill:") else title
             break
-    return f"# skill: {name}\npath: {path}\n\n{body.strip()}".strip()
+    return f"# skill: {title}\npath: {path}\n\n{body}".strip()
 
 
 SkillPlugin = PluginSpec

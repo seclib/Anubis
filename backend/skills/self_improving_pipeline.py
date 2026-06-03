@@ -127,6 +127,7 @@ class DeploymentRecord:
     sources: tuple[str, ...]
     plugin_manifest: str = ""
     indexed: bool = False
+    events: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -441,8 +442,9 @@ class PluginRegistrar:
                 False,
                 critic_decision.score,
                 tuple(filter(None, generated.document.source_path.split(","))),
+                events=("critic_rejected",),
             )
-        record = self.deployer.deploy(generated.document, critic_decision)
+        record = self.deployer.deploy(generated.document, critic_decision, generated.manifest)
         if record.approved:
             self.manager.discover()
             self.manager.enable(generated.document.name)
@@ -464,17 +466,27 @@ class SkillDeployer:
         self.reindex = reindex or (lambda: None)
         self.confirmed = confirmed
 
-    def deploy(self, document: DslDocument, validation: ValidationResult) -> DeploymentRecord:
+    def deploy(
+        self,
+        document: DslDocument,
+        validation: ValidationResult,
+        manifest: Mapping[str, Any] | None = None,
+    ) -> DeploymentRecord:
         sources = tuple(filter(None, document.source_path.split(",")))
         if not validation.approved:
-            return DeploymentRecord(document.name, "", False, validation.score, sources)
+            return DeploymentRecord(document.name, "", False, validation.score, sources, events=("validation_rejected",))
         if not self.confirmed:
             raise PermissionError("skill deployment requires confirmation")
+        events = ["validation_approved"]
         skill_path = self._write_skill(document)
-        manifest_path = self._write_manifest(document)
+        events.append("obsidian_skill_written")
+        manifest_path = self._write_manifest(document, manifest)
+        events.append("plugin_manifest_written")
         self.registry.register(document)
+        events.append("runtime_registry_registered")
         indexed = bool(self.reindex() is not False)
-        return DeploymentRecord(document.name, skill_path, True, validation.score, sources, manifest_path, indexed)
+        events.append("qdrant_reindex_requested" if indexed else "qdrant_reindex_skipped")
+        return DeploymentRecord(document.name, skill_path, True, validation.score, sources, manifest_path, indexed, tuple(events))
 
     def rollback(self, record: DeploymentRecord) -> None:
         for path in (record.path, record.plugin_manifest):
@@ -490,17 +502,17 @@ class SkillDeployer:
             self.vault.write_note(f"skills/{document.name}/{document.name}.md", document.markdown())
         return path.as_posix()
 
-    def _write_manifest(self, document: DslDocument) -> str:
+    def _write_manifest(self, document: DslDocument, manifest: Mapping[str, Any] | None = None) -> str:
         path = self._inside(self.plugin_root, Path(f"{document.name}.plugin.json"))
-        manifest = {
+        payload = dict(manifest or {
             "name": document.name,
             "enabled": True,
             "triggers": [document.trigger, document.name.replace("_", " ")],
             "skills": [document.name],
             "memory": {"obsidian": [f"skills/{document.name}"], "qdrant": [document.name, "known_patterns"]},
             "generated": {"created_at": datetime.now(UTC).isoformat(), "source": "self_improving_skill_pipeline"},
-        }
-        path.write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
+        })
+        path.write_text(json.dumps(payload, indent=2) + "\n", encoding="utf-8")
         return path.as_posix()
 
     def _inside(self, root: Path, candidate: Path) -> Path:
@@ -539,10 +551,18 @@ class FeedbackLoop:
         deployments: list[DeploymentRecord] = []
         existing = self.deployer.registry.names()
         for candidate in self.normalizer.normalize(candidates, existing):
-            document = self.compiler.compile(candidate)
-            validation = self.validator.validate(document, existing)
-            decision = self.critic.review(candidate, document, validation)
-            record = self.deployer.deploy(document, decision)
+            generated = ObsidianSkillGenerator(self.compiler).generate(
+                SkillGap(
+                    name=candidate.name,
+                    summary=f"Missing reusable skill for {candidate.name.replace('_', ' ')}",
+                    candidate=candidate,
+                    evidence=(),
+                    score=candidate.confidence,
+                )
+            )
+            validation = self.validator.validate(generated.document, existing)
+            decision = self.critic.review(candidate, generated.document, validation)
+            record = self.deployer.deploy(generated.document, decision, generated.manifest)
             deployments.append(record)
             if record.approved:
                 existing.append(record.name)

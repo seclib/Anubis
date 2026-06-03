@@ -7,7 +7,10 @@ type ShellProps = {
 
 export function Shell({ children }: ShellProps) {
   return (
-    <Layout activeView="chat" onChangeView={() => undefined}>
+    <Layout
+      activeView="chat"
+      onChangeView={() => undefined}
+    >
       {children}
     </Layout>
   );

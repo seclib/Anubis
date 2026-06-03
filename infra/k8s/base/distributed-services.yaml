@@ -1,0 +1,298 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: api-gateway
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: api-gateway}
+  template:
+    metadata:
+      labels: {app: api-gateway}
+    spec:
+      containers:
+        - name: api-gateway
+          image: anubis/distributed:latest
+          args: ["--role", "api-gateway"]
+          envFrom:
+            - configMapRef: {name: anubis-config}
+            - secretRef: {name: anubis-secrets}
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: api-gateway
+spec:
+  type: ClusterIP
+  selector: {app: api-gateway}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: company-runtime
+spec:
+  replicas: 1
+  selector:
+    matchLabels: {app: company-runtime}
+  template:
+    metadata:
+      labels: {app: company-runtime}
+    spec:
+      containers:
+        - name: company-runtime
+          image: anubis/distributed:latest
+          args: ["--role", "company-runtime"]
+          envFrom:
+            - configMapRef: {name: anubis-config}
+            - secretRef: {name: anubis-secrets}
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: git-repos
+              mountPath: /workspace/repos
+      volumes:
+        - name: git-repos
+          persistentVolumeClaim:
+            claimName: git-repos
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: orchestrator
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: orchestrator}
+  template:
+    metadata:
+      labels: {app: orchestrator}
+    spec:
+      containers:
+        - name: orchestrator
+          image: anubis/distributed:latest
+          args: ["--role", "orchestrator"]
+          envFrom:
+            - configMapRef: {name: anubis-config}
+            - secretRef: {name: anubis-secrets}
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: planner
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: planner}
+  template:
+    metadata:
+      labels: {app: planner}
+    spec:
+      containers:
+        - name: planner
+          image: anubis/distributed:latest
+          args: ["--role", "planner"]
+          envFrom:
+            - configMapRef: {name: anubis-config}
+            - secretRef: {name: anubis-secrets}
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: executor
+spec:
+  replicas: 3
+  selector:
+    matchLabels: {app: executor}
+  template:
+    metadata:
+      labels: {app: executor}
+    spec:
+      containers:
+        - name: executor
+          image: anubis/distributed:latest
+          args: ["--role", "executor"]
+          envFrom:
+            - configMapRef: {name: anubis-config}
+            - secretRef: {name: anubis-secrets}
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: git-repos
+              mountPath: /workspace/repos
+            - name: tool-sandbox
+              mountPath: /workspace/sandbox
+      volumes:
+        - name: git-repos
+          persistentVolumeClaim:
+            claimName: git-repos
+        - name: tool-sandbox
+          persistentVolumeClaim:
+            claimName: tool-sandbox
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: reviewer
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: reviewer}
+  template:
+    metadata:
+      labels: {app: reviewer}
+    spec:
+      containers:
+        - name: reviewer
+          image: anubis/distributed:latest
+          args: ["--role", "reviewer"]
+          envFrom:
+            - configMapRef: {name: anubis-config}
+            - secretRef: {name: anubis-secrets}
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: tool-runner
+spec:
+  replicas: 2
+  selector:
+    matchLabels: {app: tool-runner}
+  template:
+    metadata:
+      labels: {app: tool-runner}
+    spec:
+      containers:
+        - name: tool-runner
+          image: anubis/distributed:latest
+          args: ["--role", "tool-runner"]
+          envFrom:
+            - configMapRef: {name: anubis-config}
+            - secretRef: {name: anubis-secrets}
+          ports:
+            - containerPort: 8080
+              name: http
+          readinessProbe:
+            httpGet: {path: /ready, port: http}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          livenessProbe:
+            httpGet: {path: /health, port: http}
+            initialDelaySeconds: 15
+            periodSeconds: 20
+          securityContext:
+            allowPrivilegeEscalation: false
+            capabilities:
+              drop: ["ALL"]
+          volumeMounts:
+            - name: tool-sandbox
+              mountPath: /workspace/sandbox
+      volumes:
+        - name: tool-sandbox
+          persistentVolumeClaim:
+            claimName: tool-sandbox
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: tool-runner
+spec:
+  selector: {app: tool-runner}
+  ports:
+    - name: http
+      port: 8080
+      targetPort: http
