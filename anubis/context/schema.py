@@ -62,11 +62,64 @@ class BuiltContext:
     summary: str
 
 
+@dataclass(frozen=True)
+class ContextBudget:
+    max_tokens: int = 2500
+    max_files: int = 5
+    min_files: int = 3
+    max_chunks_per_file: int = 2
+    reserved_memory_tokens: int = 300
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class ContextBuildRequest:
+    task: str
+    repo_state: dict[str, Any] = field(default_factory=dict)
+    memory: dict[str, Any] = field(default_factory=dict)
+    budget: ContextBudget = field(default_factory=ContextBudget)
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class RankedFile:
+    path: str
+    score: float
+    reason: str
+    chunks: tuple[dict[str, Any], ...] = ()
+    estimated_tokens: int = 0
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+@dataclass(frozen=True)
+class MinimalContext:
+    task: str
+    files: tuple[RankedFile, ...]
+    memory: tuple[dict[str, Any], ...]
+    context: str
+    estimated_tokens: int
+    token_budget: int
+    omitted_files: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
 __all__ = [
     "BuiltContext",
     "CodeChunk",
+    "ContextBudget",
+    "ContextBuildRequest",
     "EmbeddedChunk",
     "FileMetadata",
+    "MinimalContext",
+    "RankedFile",
     "RepositoryIndex",
     "RetrievedContext",
 ]

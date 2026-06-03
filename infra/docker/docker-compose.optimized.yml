@@ -1,0 +1,101 @@
+services:
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --appendonly yes
+    volumes:
+      - redis_data:/data
+    networks:
+      - anubis-net
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    volumes:
+      - qdrant_data:/qdrant/storage
+    networks:
+      - anubis-net
+
+  anubis-api:
+    build:
+      context: ../..
+      dockerfile: Dockerfile
+      target: runtime
+    image: anubis-api:optimized
+    restart: unless-stopped
+    init: true
+    environment:
+      QDRANT_URL: http://qdrant:6333
+      REDIS_CACHE_URL: redis://redis:6379/0
+      HERMES_MEMORY_BACKEND: qdrant
+      WORKSPACE_ROOT: /workspace
+      PROJECT_ROOT: /workspace
+    volumes:
+      - anubis-workspace:/workspace
+      - obsidian-vault:/obsidian
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+      - qdrant
+    networks:
+      - anubis-net
+
+  anubis-core:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.core
+      target: runtime
+    image: anubis-core:optimized
+    restart: unless-stopped
+    init: true
+    environment:
+      ANUBIS_REDIS_URL: redis://redis:6379/0
+      ANUBIS_QDRANT_URL: http://qdrant:6333
+    depends_on:
+      - redis
+      - qdrant
+    networks:
+      - anubis-net
+
+  anubis-ml:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.ml
+      target: runtime
+      args:
+        ML_REQUIREMENTS: requirements/ml.txt
+    image: anubis-ml:optimized
+    restart: unless-stopped
+    init: true
+    environment:
+      ANUBIS_QDRANT_URL: http://qdrant:6333
+      ANUBIS_REDIS_URL: redis://redis:6379/0
+    depends_on:
+      - redis
+      - qdrant
+    networks:
+      - anubis-net
+
+  anubis-tooling:
+    build:
+      context: ../..
+      dockerfile: infra/docker/Dockerfile.tooling
+      target: runtime
+    image: anubis-tooling:optimized
+    restart: unless-stopped
+    init: true
+    volumes:
+      - anubis-workspace:/workspace
+    networks:
+      - anubis-net
+
+volumes:
+  anubis-workspace:
+  obsidian-vault:
+  qdrant_data:
+  redis_data:
+
+networks:
+  anubis-net:
+    driver: bridge

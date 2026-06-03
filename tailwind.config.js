@@ -1,5 +1,5 @@
 export default {
-  content: ["./index.html", "./src/**/*.{ts,tsx}"],
+  content: ["./index.html", "./src/**/*.{ts,tsx}", "./desktop-ui/**/*.{ts,tsx}"],
   theme: {
     extend: {
       colors: {

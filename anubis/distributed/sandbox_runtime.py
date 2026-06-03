@@ -156,9 +156,11 @@ class IsolatedToolExecutor:
         *,
         runtime: SandboxRuntime | None = None,
         limits: ResourceLimits | None = None,
+        start_method: str = "spawn",
     ) -> None:
         self.runtime = runtime or SandboxRuntime()
         self.limits = limits
+        self.process_context = multiprocessing.get_context(start_method)
 
     def execute(
         self,
@@ -173,8 +175,8 @@ class IsolatedToolExecutor:
 
         owns_context = context is None
         context = context or self.runtime.create(task_id, self.limits)
-        queue: multiprocessing.Queue[dict[str, Any]] = multiprocessing.Queue(maxsize=1)
-        process = multiprocessing.Process(
+        queue: multiprocessing.Queue[dict[str, Any]] = self.process_context.Queue(maxsize=1)
+        process = self.process_context.Process(
             target=_tool_worker,
             args=(context.to_dict(), tool, dict(tool_input or {}), queue),
             daemon=True,

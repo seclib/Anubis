@@ -1,0 +1,60 @@
+# syntax=docker/dockerfile:1.7
+
+FROM python:3.13-slim AS wheel-builder
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1
+
+WORKDIR /build
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends build-essential gcc \
+    && rm -rf /var/lib/apt/lists/*
+
+COPY requirements ./requirements
+RUN python -m pip install --upgrade pip wheel \
+    && python -m pip wheel --wheel-dir /wheels -r requirements/tooling.txt
+
+
+FROM python:3.13-slim AS runtime
+
+ENV PYTHONDONTWRITEBYTECODE=1 \
+    PYTHONUNBUFFERED=1 \
+    PIP_DISABLE_PIP_VERSION_CHECK=1 \
+    PIP_NO_CACHE_DIR=1 \
+    PYTHONPATH=/opt/anubis \
+    ANUBIS_ENV=production \
+    ANUBIS_HEALTH_HOST=0.0.0.0 \
+    ANUBIS_HEALTH_PORT=8082
+
+WORKDIR /opt/anubis
+
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates git openssh-client tini \
+    && rm -rf /var/lib/apt/lists/* \
+    && useradd --create-home --shell /usr/sbin/nologin toolrunner
+
+COPY --from=wheel-builder /wheels /wheels
+COPY requirements ./requirements
+RUN python -m pip install --no-cache-dir --no-index --find-links=/wheels -r requirements/tooling.txt \
+    && rm -rf /wheels /root/.cache/pip
+
+COPY anubis/tools ./anubis/tools
+COPY anubis/distributed ./anubis/distributed
+COPY anubis/__init__.py ./anubis/__init__.py
+COPY tools ./tools
+
+RUN mkdir -p /workspace/sandbox /var/log/anubis \
+    && chown -R toolrunner:toolrunner /opt/anubis /workspace/sandbox /var/log/anubis
+
+USER toolrunner
+
+EXPOSE 8082
+
+HEALTHCHECK --interval=15s --timeout=3s --start-period=20s --retries=5 \
+  CMD python -c "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8082/health', timeout=2).read()"
+
+ENTRYPOINT ["tini", "--"]
+CMD ["python", "-m", "anubis.distributed.service_entrypoint", "--role", "tool-runner", "--port", "8082"]

@@ -50,6 +50,17 @@ from anubis.distributed.attack_executor import (
     AttackExecutor,
     SandboxAttackRunner,
 )
+from anubis.distributed.auto_patch import (
+    AutoPatchGenerator,
+    AutoPatchRequest,
+    AutoPatchResult,
+    AutoPatchStage,
+    FixProposal,
+    FixProposalEngine,
+    PatchChangeProposal,
+    PatchPipeline,
+    PatchProposalStatus,
+)
 from anubis.distributed.autonomous_engine import (
     AutonomousEngineConfig,
     AutonomousEngineResult,
@@ -282,6 +293,14 @@ from anubis.distributed.sandbox_runtime import (
     SandboxedToolIntegrationLayer,
 )
 from anubis.distributed.scheduler import NodeRunner, TaskGraphScheduler
+from anubis.distributed.terminal_service import (
+    TerminalCommandRecord,
+    TerminalCommandResult,
+    TerminalEvent,
+    TerminalEventType,
+    TerminalService,
+    TerminalSession,
+)
 from anubis.distributed.self_reviewer import (
     LogicValidationReport,
     SelfReviewEngine,
@@ -407,6 +426,10 @@ __all__ = [
     "AutonomousExecutionEngine",
     "AutonomousCompanyRuntime",
     "AutonomousFeatureGenerationEngine",
+    "AutoPatchGenerator",
+    "AutoPatchRequest",
+    "AutoPatchResult",
+    "AutoPatchStage",
     "AutonomousPipeline",
     "AutonomousPipelineConfig",
     "AutonomousPipelineCycleResult",
@@ -487,6 +510,8 @@ __all__ = [
     "FeatureRouteResult",
     "FeatureStage",
     "FeatureStepMapper",
+    "FixProposal",
+    "FixProposalEngine",
     "FailureMonitor",
     "FileAccessAction",
     "FileAccessAuditEntry",
@@ -560,6 +585,9 @@ __all__ = [
     "OrchestrationReceipt",
     "PathValidationResult",
     "PathValidator",
+    "PatchChangeProposal",
+    "PatchPipeline",
+    "PatchProposalStatus",
     "PermissionDecision",
     "PermissionManager",
     "PermissionedToolIntegrationLayer",
@@ -669,6 +697,12 @@ __all__ = [
     "TaskGraphNodeType",
     "TaskGraphRun",
     "TaskGraphScheduler",
+    "TerminalCommandRecord",
+    "TerminalCommandResult",
+    "TerminalEvent",
+    "TerminalEventType",
+    "TerminalService",
+    "TerminalSession",
     "TaskEnvelope",
     "TaskStateNotFoundError",
     "TaskStateRecord",

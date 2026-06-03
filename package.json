@@ -7,13 +7,22 @@
     "dev": "vite --host 127.0.0.1",
     "build": "tsc && vite build",
     "preview": "vite preview --host 127.0.0.1",
+    "next:dev": "next dev desktop-ui -H 127.0.0.1",
+    "next:build": "next build desktop-ui",
+    "next:start": "next start desktop-ui -H 127.0.0.1",
     "tauri": "tauri",
+    "tauri:size": "bash scripts/tauri_size_report.sh",
+    "tauri:clean": "bash scripts/tauri_clean_artifacts.sh",
+    "tauri:clean:all": "bash scripts/tauri_clean_all_reinstallable.sh",
+    "tauri:build:prod": "bash scripts/tauri_prod_build.sh",
     "anubis": "./start-anubis.sh --dev",
     "anubis:prod": "./start-anubis.sh --prod"
   },
   "dependencies": {
     "@tauri-apps/api": "^2.0.0",
+    "framer-motion": "^11.18.2",
     "lucide-react": "^0.468.0",
+    "next": "^14.2.35",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "zustand": "^5.0.14"

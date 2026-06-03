@@ -13,7 +13,18 @@ from anubis.context.interfaces import (
 )
 from anubis.context.retriever.retriever import HybridContextRetriever
 from anubis.context.scanner import RepositoryScanner
-from anubis.context.schema import BuiltContext, CodeChunk, FileMetadata, RepositoryIndex, RetrievedContext
+from anubis.context.service import ContextBuilderService
+from anubis.context.schema import (
+    BuiltContext,
+    CodeChunk,
+    ContextBudget,
+    ContextBuildRequest,
+    FileMetadata,
+    MinimalContext,
+    RankedFile,
+    RepositoryIndex,
+    RetrievedContext,
+)
 
 __all__ = [
     "AdvancedContextCompressor",
@@ -21,6 +32,9 @@ __all__ = [
     "CodeChunk",
     "CodeChunker",
     "ContextBuilder",
+    "ContextBuilderService",
+    "ContextBudget",
+    "ContextBuildRequest",
     "ContextCompressor",
     "ContextEngine",
     "ContextIndexer",
@@ -30,6 +44,8 @@ __all__ = [
     "FileMetadata",
     "HashEmbeddingProvider",
     "HybridContextRetriever",
+    "MinimalContext",
+    "RankedFile",
     "RepositoryIndex",
     "RepositoryIndexer",
     "RepositoryScanner",

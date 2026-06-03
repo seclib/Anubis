@@ -5,6 +5,13 @@
 :root {
   color: #f5f5f5;
   background: #0a0a0a;
+  --ease-anubis: cubic-bezier(0.4, 0, 0.2, 1);
+  --ease-anubis-enter: cubic-bezier(0.2, 0.8, 0.2, 1);
+  --ease-anubis-exit: cubic-bezier(0.4, 0, 0.6, 1);
+  --motion-micro: 160ms;
+  --motion-ui: 240ms;
+  --motion-panel: 360ms;
+  --motion-page: 520ms;
   font-family:
     Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
     sans-serif;
@@ -25,6 +32,7 @@ body,
   min-height: 100vh;
   margin: 0;
   background: #0a0a0a;
+  overscroll-behavior: none;
 }
 
 button,
@@ -40,6 +48,122 @@ button {
 textarea,
 input {
   color-scheme: dark;
+}
+
+button,
+input,
+textarea {
+  transition-timing-function: var(--ease-anubis);
+}
+
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+textarea {
+  caret-color: #22d3ee;
+  transition:
+    height var(--motion-ui) var(--ease-anubis),
+    background-color var(--motion-ui) var(--ease-anubis),
+    box-shadow var(--motion-ui) var(--ease-anubis);
+}
+
+.anubis-depth-layer {
+  transition:
+    transform var(--motion-panel) var(--ease-anubis),
+    filter var(--motion-panel) var(--ease-anubis),
+    opacity var(--motion-panel) var(--ease-anubis);
+  transform-origin: center;
+}
+
+.anubis-depth-layer.drawer-open,
+.anubis-depth-layer.panel-open {
+  transform: scale(0.985) translateY(4px);
+  filter: saturate(0.92) brightness(0.82);
+}
+
+.anubis-drawer {
+  transition:
+    transform var(--motion-panel) var(--ease-anubis-enter),
+    opacity var(--motion-panel) var(--ease-anubis),
+    box-shadow var(--motion-panel) var(--ease-anubis);
+  will-change: transform, opacity;
+}
+
+.anubis-drawer.closed {
+  opacity: 0.82;
+  transition-duration: 240ms;
+  transition-timing-function: var(--ease-anubis-exit);
+}
+
+.anubis-panel {
+  animation: anubis-panel-enter var(--motion-panel) var(--ease-anubis-enter) both;
+  will-change: transform, opacity;
+}
+
+.transition-opacity {
+  transition-duration: var(--motion-ui);
+  transition-timing-function: var(--ease-anubis);
+}
+
+.anubis-card-settle {
+  animation: anubis-card-settle var(--motion-page) var(--ease-anubis-enter) both;
+}
+
+.anubis-message {
+  animation: anubis-message-enter 240ms var(--ease-anubis-enter) both;
+  will-change: transform, opacity, filter;
+}
+
+.anubis-message:nth-of-type(2) {
+  animation-delay: 36ms;
+}
+
+.anubis-message:nth-of-type(3) {
+  animation-delay: 72ms;
+}
+
+.anubis-chunk {
+  animation: anubis-chunk-reveal 170ms var(--ease-anubis-enter) both;
+}
+
+.anubis-composer {
+  transition:
+    transform var(--motion-micro) var(--ease-anubis),
+    box-shadow var(--motion-ui) var(--ease-anubis),
+    border-color var(--motion-ui) var(--ease-anubis),
+    background-color var(--motion-ui) var(--ease-anubis);
+}
+
+.anubis-composer:focus-within {
+  border-color: rgba(34, 211, 238, 0.48);
+  background-color: rgba(15, 23, 42, 0.96);
+  box-shadow:
+    0 0 0 1px rgba(34, 211, 238, 0.18),
+    0 0 38px rgba(34, 211, 238, 0.08),
+    0 18px 55px rgba(0, 0, 0, 0.28);
+}
+
+.anubis-composer.sending {
+  transform: scale(0.985) translateY(1px);
+}
+
+.anubis-typing-dot {
+  animation: anubis-dot-breathe 1300ms var(--ease-anubis) infinite;
+}
+
+.anubis-typing-dot:nth-child(2) {
+  animation-delay: 140ms;
+}
+
+.anubis-typing-dot:nth-child(3) {
+  animation-delay: 280ms;
+}
+
+.momentum-scroll {
+  -webkit-overflow-scrolling: touch;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
 }
 
 ::selection {
@@ -61,4 +185,76 @@ input {
   border-radius: 999px;
   background: #3f3f46;
   background-clip: content-box;
+}
+
+@keyframes anubis-panel-enter {
+  from {
+    opacity: 0;
+    transform: translateX(18px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0) scale(1);
+  }
+}
+
+@keyframes anubis-card-settle {
+  from {
+    opacity: 0;
+    transform: translateX(12px);
+    filter: blur(4px);
+  }
+  to {
+    opacity: 1;
+    transform: translateX(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes anubis-message-enter {
+  from {
+    opacity: 0;
+    transform: translateY(10px);
+    filter: blur(5px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+    filter: blur(0);
+  }
+}
+
+@keyframes anubis-chunk-reveal {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes anubis-dot-breathe {
+  0%,
+  80%,
+  100% {
+    opacity: 0.34;
+    transform: translateX(0) scale(0.82);
+  }
+  35% {
+    opacity: 1;
+    transform: translateX(1px) scale(1);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 1ms !important;
+    animation-iteration-count: 1 !important;
+    scroll-behavior: auto !important;
+    transition-duration: 1ms !important;
+  }
 }

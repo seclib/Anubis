@@ -10,6 +10,7 @@ from retrieval.confidence import retrieval_confidence
 from retrieval.context_builder import build_context
 from retrieval.embedding_pipeline import EmbeddingPipeline
 from retrieval.hybrid import HybridRetriever
+from retrieval.optimized import OptimizedRetriever, optimized_retrieval_architecture
 from retrieval.query_planner import QueryPlanner
 from retrieval.qdrant_engine import QdrantRetrievalEngine
 from services.cache_manager import CacheManager, get_cache_manager
@@ -27,7 +28,7 @@ class RetrievalService:
         obsidian: ObsidianStore | None = None,
         cache: CacheManager | None = None,
         embeddings: EmbeddingPipeline | None = None,
-        hybrid: HybridRetriever | None = None,
+        hybrid: HybridRetriever | OptimizedRetriever | None = None,
     ) -> None:
         self.qdrant = qdrant or QdrantStore()
         self.keyword = keyword or KeywordIndex()
@@ -35,7 +36,7 @@ class RetrievalService:
         self.cache = cache or get_cache_manager()
         self.embeddings = embeddings or EmbeddingPipeline(cache=self.cache)
         self.qdrant_engine = QdrantRetrievalEngine(store=self.qdrant, embeddings=self.embeddings)
-        self.hybrid = hybrid or HybridRetriever(
+        self.hybrid = hybrid or OptimizedRetriever(
             qdrant=self.qdrant_engine,
             keyword=self.keyword,
             embeddings=self.embeddings,
@@ -94,7 +95,7 @@ class RetrievalService:
             top_k=top_k,
         )
         final_results = hybrid["results"]
-        context = build_context(final_results)
+        context = build_context(final_results, max_chars=4000)
         confidence = retrieval_confidence(final_results)
         answer = None
         if generate_answer:
@@ -109,11 +110,13 @@ class RetrievalService:
                 "query_hit_type": cache.get("hit_type"),
                 "embedding": embedding_result.get("cache"),
                 "hybrid_channels": hybrid.get("channels"),
+                "optimization": hybrid.get("optimization"),
             },
             "results": final_results,
             "context": context,
             "confidence": confidence,
             "answer": answer,
+            "architecture": optimized_retrieval_architecture().to_dict(),
         }
         self.cache.store_query(
             clean_query,

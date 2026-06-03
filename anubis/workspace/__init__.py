@@ -1,0 +1,53 @@
+"""Workspace services for ANUBIS desktop."""
+
+from anubis.workspace.git_workspace import (
+    BranchCreationResult,
+    CommitProposal,
+    CommitResult,
+    DiffFile,
+    DiffView,
+    GitCommandResult,
+    GitFileChange,
+    GitWorkspace,
+    GitWorkspaceConfig,
+    GitWorkspaceError,
+    GitWorkspaceStatus,
+    PullRequestDraft,
+)
+from anubis.workspace.vault_workspace import (
+    VaultBacklink,
+    VaultGraph,
+    VaultGraphEdge,
+    VaultGraphNode,
+    VaultNote,
+    VaultSearchResult,
+    VaultWorkspace,
+    VaultWorkspaceError,
+    VaultWorkspaceSnapshot,
+    VaultWriteResult,
+)
+
+__all__ = [
+    "BranchCreationResult",
+    "CommitProposal",
+    "CommitResult",
+    "DiffFile",
+    "DiffView",
+    "GitCommandResult",
+    "GitFileChange",
+    "GitWorkspace",
+    "GitWorkspaceConfig",
+    "GitWorkspaceError",
+    "GitWorkspaceStatus",
+    "PullRequestDraft",
+    "VaultBacklink",
+    "VaultGraph",
+    "VaultGraphEdge",
+    "VaultGraphNode",
+    "VaultNote",
+    "VaultSearchResult",
+    "VaultWorkspace",
+    "VaultWorkspaceError",
+    "VaultWorkspaceSnapshot",
+    "VaultWriteResult",
+]

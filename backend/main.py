@@ -4,7 +4,20 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 from fastapi.middleware.cors import CORSMiddleware
 
-from backend.api.routes import agent, brain, desktop, health, local, notes, production, rag, skills
+from backend.api.routes import (
+    agent,
+    brain,
+    desktop,
+    git_workspace,
+    health,
+    local,
+    notes,
+    production,
+    rag,
+    skills,
+    terminal,
+    vault_workspace,
+)
 from backend.core.config import settings
 from backend.core.logging import configure_logging
 from backend.watcher.markdown_watcher import start_observer, stop_observer
@@ -42,6 +55,9 @@ app.include_router(notes.router, prefix="/notes", tags=["notes"])
 app.include_router(rag.router, prefix="/rag", tags=["rag"])
 app.include_router(agent.router, prefix="/agent", tags=["agent"])
 app.include_router(skills.router, prefix="/api", tags=["skills"])
+app.include_router(git_workspace.router, prefix="/api/git", tags=["git"])
+app.include_router(terminal.router, prefix="/api/terminal", tags=["terminal"])
+app.include_router(vault_workspace.router, prefix="/api/vault", tags=["vault"])
 app.include_router(brain.router, prefix="/brain", tags=["brain"])
 
 

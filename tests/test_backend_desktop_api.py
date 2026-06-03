@@ -1,3 +1,4 @@
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -5,7 +6,7 @@ from unittest.mock import AsyncMock, patch
 
 from fastapi.testclient import TestClient
 
-from backend.api.routes import brain, desktop, local, notes, production, rag, skills
+from backend.api.routes import brain, desktop, local, notes, production, rag, skills, terminal, vault_workspace
 from backend.main import app
 from backend.vault.service import VaultService
 
@@ -22,6 +23,8 @@ class BackendDesktopApiTest(unittest.TestCase):
         desktop.reset_route_state()
         skills.reset_route_state()
         brain.reset_route_state()
+        terminal.reset_route_state()
+        vault_workspace.reset_route_state()
         self.patchers = [
             patch("backend.api.routes.local.get_vault", return_value=self.vault),
             patch("backend.api.routes.notes.get_vault", return_value=self.vault),
@@ -29,6 +32,7 @@ class BackendDesktopApiTest(unittest.TestCase):
             patch("backend.api.routes.desktop.get_vault", return_value=self.vault),
             patch("backend.api.routes.skills.get_skills_dir", return_value=self.vault_path / "skills"),
             patch("backend.api.routes.brain._vault", return_value=self.vault),
+            patch("backend.api.routes.vault_workspace.get_vault_workspace", return_value=vault_workspace.VaultWorkspace(self.vault_path)),
             patch("backend.api.routes.production.get_indexer"),
             patch("backend.api.routes.production.get_retriever"),
         ]
@@ -203,6 +207,83 @@ class BackendDesktopApiTest(unittest.TestCase):
 
         self.assertEqual(ask_response.status_code, 200)
         self.assertEqual(ask_response.json()["answer"], "Anubis uses files first.")
+
+    def test_terminal_api_runs_sandboxed_command_and_streams_events(self) -> None:
+        create_response = self.client.post("/api/terminal/sessions", json={"task_id": "api-terminal"})
+        self.assertEqual(create_response.status_code, 200)
+        session = create_response.json()["session"]
+
+        command_response = self.client.post(
+            f"/api/terminal/sessions/{session['session_id']}/commands",
+            json={"command": "echo terminal-ready"},
+        )
+
+        self.assertEqual(command_response.status_code, 200)
+        command_payload = command_response.json()
+        self.assertTrue(command_payload["command"]["success"])
+        self.assertIn("terminal-ready", command_payload["command"]["output"])
+
+        events_response = self.client.get(f"/api/terminal/sessions/{session['session_id']}/events")
+        self.assertEqual(events_response.status_code, 200)
+        event_types = [event["event_type"] for event in events_response.json()["events"]]
+        self.assertIn("command_started", event_types)
+        self.assertIn("output", event_types)
+        self.assertIn("command_completed", event_types)
+
+    def test_git_workspace_api_prepares_diff_commit_and_pr_payload(self) -> None:
+        repo = self.vault_path / "repo"
+        repo.mkdir()
+        subprocess.run(["git", "init", "-b", "main"], cwd=repo, check=True, capture_output=True, text=True)
+        subprocess.run(["git", "config", "user.email", "anubis@example.test"], cwd=repo, check=True)
+        subprocess.run(["git", "config", "user.name", "Anubis Test"], cwd=repo, check=True)
+        (repo / "README.md").write_text("# Repo\n", encoding="utf-8")
+        subprocess.run(["git", "add", "README.md"], cwd=repo, check=True)
+        subprocess.run(["git", "commit", "-m", "chore: initial"], cwd=repo, check=True, capture_output=True, text=True)
+        (repo / "README.md").write_text("# Repo\n\nNative Git workspace\n", encoding="utf-8")
+
+        with patch("backend.api.routes.git_workspace.settings.project_root", self.vault_path):
+            branch_response = self.client.post(
+                "/api/git/branches",
+                json={"repo_path": "repo", "branch": "Feature Git UX"},
+            )
+            diff_response = self.client.post("/api/git/diff", json={"repo_path": "repo"})
+            proposal_response = self.client.post(
+                "/api/git/commits/proposal",
+                json={"repo_path": "repo", "description": "add native git workspace", "paths": ["README.md"]},
+            )
+            pr_response = self.client.post(
+                "/api/git/pull-request/draft",
+                json={"repo_path": "repo", "description": "add native git workspace", "linked_tasks": ["task-git"]},
+            )
+
+        self.assertEqual(branch_response.status_code, 200)
+        self.assertEqual(branch_response.json()["branch"], "feature-git-ux")
+        self.assertEqual(diff_response.status_code, 200)
+        self.assertEqual(diff_response.json()["files"][0]["path"], "README.md")
+        self.assertEqual(proposal_response.status_code, 200)
+        self.assertEqual(proposal_response.json()["message"], "feat: add native git workspace")
+        self.assertEqual(pr_response.status_code, 200)
+        self.assertIn("task-git", pr_response.json()["body"])
+
+    def test_vault_workspace_api_exposes_navigation_graph_backlinks_and_search(self) -> None:
+        self.vault.write_note("Architecture.md", "# Architecture\n\nSee [[Memory]] and [Planner](Planner.md).")
+        self.vault.write_note("Memory.md", "# Memory\n\nLocal-first memory search.")
+        self.vault.write_note("Planner.md", "# Planner\n\nPlan execution.")
+
+        navigation_response = self.client.get("/api/vault/navigation")
+        graph_response = self.client.get("/api/vault/graph")
+        backlinks_response = self.client.get("/api/vault/backlinks", params={"path": "Memory.md"})
+        search_response = self.client.get("/api/vault/search", params={"query": "memory search"})
+
+        self.assertEqual(navigation_response.status_code, 200)
+        self.assertTrue(any(note["path"] == "Architecture.md" for note in navigation_response.json()["notes"]))
+        self.assertEqual(graph_response.status_code, 200)
+        edges = {(edge["source"], edge["target"]) for edge in graph_response.json()["edges"]}
+        self.assertIn(("Architecture.md", "Memory.md"), edges)
+        self.assertEqual(backlinks_response.status_code, 200)
+        self.assertEqual(backlinks_response.json()["backlinks"][0]["source_path"], "Architecture.md")
+        self.assertEqual(search_response.status_code, 200)
+        self.assertEqual(search_response.json()["results"][0]["path"], "Memory.md")
 
 
 if __name__ == "__main__":

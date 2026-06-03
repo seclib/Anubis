@@ -28,17 +28,32 @@ from retrieval.memory_router import (
     route_with_classification,
     to_candidate,
 )
+from retrieval.optimized import (
+    ChunkDeduplicator,
+    HierarchicalRanker,
+    OptimizedRetriever,
+    QueryRouter as OptimizedQueryRouter,
+    RetrievalArchitecture,
+    RetrievalRoute,
+    optimized_retrieval_architecture,
+)
 
 __all__ = [
     "Conflict",
     "ContextMerger",
+    "ChunkDeduplicator",
     "FusedContextItem",
+    "HierarchicalRanker",
     "MemoryCandidate",
     "MemoryRouteResult",
     "MemoryRouter",
     "MemoryRoutingDecision",
+    "OptimizedQueryRouter",
+    "OptimizedRetriever",
     "QueryClassification",
     "QueryClassifier",
+    "RetrievalArchitecture",
+    "RetrievalRoute",
     "ScoredMemory",
     "aggregate_confidence",
     "aggregate_route_confidence",
@@ -54,4 +69,5 @@ __all__ = [
     "route_with_classification",
     "score_memories",
     "to_candidate",
+    "optimized_retrieval_architecture",
 ]
