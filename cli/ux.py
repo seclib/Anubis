@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
-from cli.agents import STATE_ORDER
+from anubis.agents import STATE_ORDER
 
 
 def render_block(task: str, status: Mapping[str, str] | str | None, result: str) -> str:
@@ -29,6 +29,8 @@ def render_status(status: Mapping[str, str] | str | None) -> str:
         return clean(status)
     if not status:
         return "none"
+    if "__logs__" in status:
+        return clean(status["__logs__"])
 
     emitted: set[str] = set()
     lines: list[str] = []

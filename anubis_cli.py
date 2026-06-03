@@ -163,7 +163,7 @@ def load_runtime_hooks() -> RuntimeHooks:
         pass
 
     try:
-        from cli.router import CommandRouter
+        from anubis.core.router import CommandRouter
 
         hooks.command_router = CommandRouter()
     except Exception:
