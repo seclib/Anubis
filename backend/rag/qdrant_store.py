@@ -54,18 +54,19 @@ class QdrantStore:
             _FALLBACK_POINTS[str(point["id"])] = point
         points = [
             PointStruct(
-                id=str(uuid5(NAMESPACE_URL, chunk.id)),
-                vector=self.embedder.embed(chunk.text),
-                payload=chunk.__dict__,
+                id=point["id"],
+                vector=point["vector"],
+                payload=point["payload"],
             )
-            for chunk in chunks
+            for point in fallback_points
         ]
         try:
             self.ensure_collection()
             if points:
                 self.client.upsert(collection_name=self.collection, points=points)
             logger.info("upserted qdrant points=%s collection=%s", len(points), self.collection)
-        except RuntimeError:
+        except Exception as exc:  # pragma: no cover - qdrant state varies by environment
+            logger.warning("qdrant upsert failed; using local search fallback: %s", exc)
             logger.info("upserted fallback points=%s", len(fallback_points))
 
     def delete_path(self, path: str) -> None:
@@ -81,7 +82,8 @@ class QdrantStore:
                 ),
             )
             logger.info("deleted qdrant path=%s fallback_points=%s", path, len(deleted))
-        except RuntimeError:
+        except Exception as exc:  # pragma: no cover - qdrant state varies by environment
+            logger.warning("qdrant delete failed; using local search fallback: %s", exc)
             logger.info("deleted fallback path=%s points=%s", path, len(deleted))
 
     def search(self, query: str, limit: int) -> list[dict[str, object]]:
@@ -97,7 +99,8 @@ class QdrantStore:
             results = [{"score": result.score, **dict(result.payload or {})} for result in response.points]
             logger.info("qdrant query collection=%s limit=%s results=%s", self.collection, limit, len(results))
             return results
-        except RuntimeError:
+        except Exception as exc:  # pragma: no cover - qdrant state varies by environment
+            logger.warning("qdrant query failed; using local search fallback: %s", exc)
             scored = [
                 {"score": _cosine(vector, point["vector"]), **dict(point["payload"])}
                 for point in _FALLBACK_POINTS.values()

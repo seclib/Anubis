@@ -2,7 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 
-from anubis.cli.output import format_output
+from anubis.cli.formatter import format_output
 from anubis.core.router import CommandRouter, RouteResult
 
 
@@ -30,7 +30,7 @@ def normalize_input(line: str) -> str:
     text = line.strip()
     if not text:
         return ""
-    if text in {"help", "status"}:
+    if text in {"help", "status", "swarm", "agent"}:
         return f"/{text}"
     if not text.startswith("/"):
         return f"/build {text}"

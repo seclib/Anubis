@@ -11,6 +11,11 @@ def health() -> dict[str, str]:
     return {"status": "ok"}
 
 
+@router.get("/health/live")
+def live() -> dict[str, str]:
+    return health()
+
+
 @router.get("/health/ready")
 def ready() -> dict[str, object]:
     return {

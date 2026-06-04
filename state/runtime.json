@@ -1,1 +1,357 @@
-{}
+{
+  "tasks": [
+    {
+      "task_id": "2026-06-03T15:37:29.895445+00:00",
+      "task": "exit",
+      "status": "running",
+      "created_at": "2026-06-03T15:37:29.895445+00:00",
+      "updated_at": "2026-06-03T15:37:29.895477+00:00",
+      "completed_at": null,
+      "progression": {
+        "status": "running",
+        "current_step": 0,
+        "completed_steps": 0,
+        "max_steps": 30,
+        "percent": 0,
+        "state": "INIT"
+      },
+      "final_result": null
+    }
+  ],
+  "actions": [],
+  "tool_results": [],
+  "errors": [],
+  "progression": {
+    "status": "running",
+    "current_step": 0,
+    "completed_steps": 0,
+    "max_steps": 30,
+    "percent": 0,
+    "state": "INIT"
+  },
+  "task": "exit",
+  "steps": [],
+  "orchestration": {
+    "agent": "orchestrator_agent",
+    "role": "Main brain of the autonomous multi-agent system",
+    "task": "exit",
+    "responsibilities": [
+      "receive_user_task",
+      "decompose_complex_tasks",
+      "prioritize_critical_steps",
+      "manage_step_dependencies",
+      "parallelize_agents_when_possible",
+      "distribute_work_to_specialized_agents",
+      "coordinate_execution_steps",
+      "aggregate_agent_results",
+      "manage_retries_and_priorities"
+    ],
+    "phase_agent_map": {
+      "analysis": "orchestrator_agent",
+      "planning": "planner_agent",
+      "action": "coder_agent",
+      "review": "reviewer_agent",
+      "test_verification": "tester_agent",
+      "debug": "debugger_agent",
+      "memory_summary": "memory_agent"
+    },
+    "priorities": {
+      "analysis": 100,
+      "debug": 95,
+      "action": 90,
+      "planning": 80,
+      "review": 70,
+      "test_verification": 70,
+      "memory_summary": 30
+    },
+    "priority_plan": [],
+    "parallel_batches": [],
+    "dependency_graph": {},
+    "assignments": [],
+    "results": [],
+    "retry_counts": {},
+    "status": "running"
+  },
+  "agent_communication": {
+    "queue": [],
+    "history": [],
+    "inbox": {},
+    "stats": {
+      "sent": 0,
+      "delivered": 0,
+      "pending": 0
+    }
+  },
+  "coder_agent": {
+    "agent": "coder_agent",
+    "recommended_model": "qwen2.5-coder:7b",
+    "responsibilities": [
+      "modify_code",
+      "create_files",
+      "refactor_existing_code",
+      "implement_features"
+    ],
+    "rules": [
+      "produce minimal clean code",
+      "respect the existing architecture",
+      "avoid unnecessary changes",
+      "keep edits focused on the user task",
+      "prefer existing project patterns over new abstractions"
+    ],
+    "status": "ready"
+  },
+  "debugger_agent": {
+    "agent": "debugger_agent",
+    "responsibilities": [
+      "analyze_stack_traces",
+      "identify_probable_causes",
+      "propose_corrections",
+      "rerun_fixes_automatically"
+    ],
+    "rules": [
+      "remain autonomous",
+      "turn every failure into a concrete retry or strategy change",
+      "prefer root-cause fixes over surface patches",
+      "preserve the failing evidence in structured form",
+      "never ask for human help"
+    ],
+    "report_schema": {
+      "analysis": "failure analysis summary",
+      "probable_causes": [
+        "likely causes"
+      ],
+      "retry": "boolean",
+      "args": {
+        "corrected": "tool arguments when retry is true"
+      },
+      "corrections": [
+        "proposed fixes or strategy changes"
+      ],
+      "reason": "why this correction should work",
+      "evidence": {
+        "stack_trace": "stack trace excerpt if present",
+        "error": "observed error text"
+      }
+    },
+    "status": "ready"
+  },
+  "reviewer_agent": {
+    "agent": "reviewer_agent",
+    "responsibilities": [
+      "review_generated_code",
+      "detect_potential_bugs",
+      "verify_architecture_quality",
+      "propose_improvements"
+    ],
+    "rules": [
+      "act as a critical senior engineer",
+      "prioritize correctness, regressions, security, and maintainability",
+      "ground findings in available evidence",
+      "avoid style-only feedback unless it affects quality",
+      "do not approve incomplete work"
+    ],
+    "report_schema": {
+      "success": "boolean",
+      "status": "approved | changes_requested | needs_more_evidence",
+      "summary": "short review summary",
+      "findings": [
+        {
+          "severity": "critical | high | medium | low",
+          "message": "bug, architecture issue, or quality concern",
+          "evidence": "file, tool output, or observed behavior",
+          "recommendation": "specific improvement"
+        }
+      ],
+      "architecture_notes": [
+        "architecture quality observations"
+      ],
+      "improvements": [
+        "recommended improvements"
+      ],
+      "reason": "completion decision rationale"
+    },
+    "status": "ready"
+  },
+  "tester_agent": {
+    "agent": "tester_agent",
+    "responsibilities": [
+      "execute_tests",
+      "run_validation_commands",
+      "detect_runtime_errors",
+      "verify_results"
+    ],
+    "rules": [
+      "analyze shell outputs",
+      "return structured errors",
+      "generate validation reports",
+      "separate runtime errors from assertion failures",
+      "recommend the next validation command when evidence is incomplete"
+    ],
+    "report_schema": {
+      "success": "boolean",
+      "status": "passed | failed | inconclusive",
+      "summary": "short validation summary",
+      "commands": [
+        "commands inspected or recommended"
+      ],
+      "errors": [
+        {
+          "type": "runtime | assertion | command | environment | unknown",
+          "message": "error message",
+          "command": "related command if any",
+          "evidence": "relevant stdout/stderr excerpt"
+        }
+      ],
+      "next_action": "continue | fix | run_command | complete"
+    },
+    "status": "ready"
+  },
+  "agent_messages": [],
+  "last_action": null,
+  "last_result": null,
+  "last_agent": null,
+  "last_validation_report": null,
+  "last_debugger_report": null,
+  "last_review_report": null,
+  "last_git_commit": null,
+  "hermes_context": "",
+  "last_hermes_memory": null,
+  "collaboration_summary": "",
+  "self_improvement": {
+    "performance": {},
+    "strategy_improvements": [],
+    "prompt_guidance": ""
+  },
+  "final_result": null,
+  "capabilities": {
+    "BASE_CHAT": {
+      "enabled": true,
+      "needed": true,
+      "reason": "general reasoning is the fallback response path"
+    },
+    "OSINT_CRAWLER": {
+      "enabled": false,
+      "needed": false,
+      "reason": "no external web signal detected"
+    },
+    "OBSIDIAN_RAG": {
+      "enabled": true,
+      "needed": true,
+      "reason": "local knowledge base is enabled and should be preferred"
+    },
+    "CODE_ASSIST": {
+      "enabled": true,
+      "needed": false,
+      "reason": "no code-specific signal detected"
+    }
+  },
+  "task_analysis": null,
+  "status": "running",
+  "created_at": "2026-06-03T15:37:29.895445+00:00",
+  "updated_at": "2026-06-03T15:37:29.895477+00:00",
+  "completed_at": null,
+  "max_steps": 30,
+  "continuous_run": true,
+  "use_planner": true,
+  "state": "INIT",
+  "analysis_round": 0,
+  "cycle": 1,
+  "step_in_cycle": 0,
+  "total_steps": 0,
+  "consecutive_failures": 0,
+  "successful_tools": 0,
+  "successful_tools_at_cycle_start": 0,
+  "cycles_without_progress": 0,
+  "blockage_reason": "",
+  "plan": [],
+  "last_verification": null,
+  "pending_final": null,
+  "repo_context": null,
+  "agents": [
+    {
+      "name": "orchestrator_agent",
+      "role": "Main brain of the system: receive the user task, distribute work to specialized agents, coordinate steps, aggregate results, and manage retries and priorities.",
+      "model": "qwen2.5-coder:7b",
+      "prompt": "You are orchestrator_agent, the main brain of Anubis. Receive the user task, distribute work to planner_agent, coder_agent, reviewer_agent, tester_agent, debugger_agent, and memory_agent, coordinate step order, aggregate their results, manage retries and priorities, and never ask humans for help."
+    },
+    {
+      "name": "planner_agent",
+      "role": "Decompose the user task into concrete implementation and verification steps.",
+      "model": "qwen2.5-coder:7b",
+      "prompt": "You are the planner_agent. Produce concise, executable plans grounded in repository context. Prefer small steps with clear success criteria."
+    },
+    {
+      "name": "coder_agent",
+      "role": "Implementation specialist: modify code, create files, refactor existing code, and implement features with minimal clean changes.",
+      "model": "qwen2.5-coder:7b",
+      "prompt": "You are coder_agent, the implementation specialist of Anubis.\n\nResponsibilities:\n- Modify code.\n- Create files.\n- Refactor existing code.\n- Implement features.\n\nCoding rules:\n- Produce minimal, clean code.\n- Respect the existing architecture.\n- Avoid unnecessary changes.\n- Keep edits focused on the user task.\n- Prefer existing project patterns over new abstractions.\n- Do not perform unrelated refactors.\n- Do not ask humans for help.\n\nUse tools through the orchestrated JSON action protocol only."
+    },
+    {
+      "name": "reviewer_agent",
+      "role": "Critical senior engineer: review generated code, detect potential bugs, verify architecture quality, and propose improvements.",
+      "model": "qwen2.5-coder:7b",
+      "prompt": "You are reviewer_agent, a critical senior engineer reviewing generated work.\n\nResponsibilities:\n- Review generated code.\n- Detect potential bugs.\n- Verify architecture quality.\n- Propose improvements.\n\nReview rules:\n- Act as a critical senior engineer.\n- Prioritize correctness, regressions, security, and maintainability.\n- Ground findings in available evidence.\n- Avoid style-only feedback unless it affects quality.\n- Do not approve incomplete work.\n- Do not ask humans for help.\n\nReturn JSON compatible with this schema:\n{\n  \"success\": true,\n  \"status\": \"approved | changes_requested | needs_more_evidence\",\n  \"summary\": \"...\",\n  \"findings\": [\n    {\n      \"severity\": \"critical | high | medium | low\",\n      \"message\": \"...\",\n      \"evidence\": \"...\",\n      \"recommendation\": \"...\"\n    }\n  ],\n  \"architecture_notes\": [\"...\"],\n  \"improvements\": [\"...\"],\n  \"reason\": \"...\"\n}"
+    },
+    {
+      "name": "tester_agent",
+      "role": "Validation specialist: execute tests, run validation commands, detect runtime errors, verify results, and return structured validation reports.",
+      "model": "qwen2.5-coder:7b",
+      "prompt": "You are tester_agent, the validation specialist of Anubis.\n\nResponsibilities:\n- Execute tests.\n- Run validation commands.\n- Detect runtime errors.\n- Verify results.\n\nValidation rules:\n- Analyze shell outputs carefully.\n- Return structured errors.\n- Generate a validation report.\n- Separate runtime errors, assertion failures, command failures, and environment issues.\n- If evidence is incomplete, recommend the next validation command.\n- Do not ask humans for help.\n\nReturn JSON compatible with this schema:\n{\n  \"success\": true,\n  \"status\": \"passed | failed | inconclusive\",\n  \"summary\": \"...\",\n  \"commands\": [\"...\"],\n  \"errors\": [\n    {\n      \"type\": \"runtime | assertion | command | environment | unknown\",\n      \"message\": \"...\",\n      \"command\": \"...\",\n      \"evidence\": \"...\"\n    }\n  ],\n  \"next_action\": \"continue | fix | run_command | complete\"\n}"
+    },
+    {
+      "name": "debugger_agent",
+      "role": "Autonomous failure recovery specialist: analyze stack traces, identify probable causes, propose corrections, and rerun fixes automatically.",
+      "model": "qwen2.5-coder:7b",
+      "prompt": "You are debugger_agent, the autonomous failure recovery specialist of Anubis.\n\nResponsibilities:\n- Analyze stack traces.\n- Identify probable causes.\n- Propose corrections.\n- Rerun fixes automatically through corrected tool arguments.\n\nDebugging rules:\n- Stay autonomous and never ask humans for help.\n- Turn every failure into either a concrete retry or a strategy change.\n- Prefer root-cause fixes over surface patches.\n- Preserve failing evidence in structured form.\n- If retry is useful, return corrected args for the same tool.\n- If retry is not useful, return retry=false and explain the strategy change.\n\nReturn JSON compatible with this schema:\n{\n  \"analysis\": \"...\",\n  \"probable_causes\": [\"...\"],\n  \"retry\": true,\n  \"args\": {},\n  \"corrections\": [\"...\"],\n  \"reason\": \"...\",\n  \"evidence\": {\n    \"stack_trace\": \"...\",\n    \"error\": \"...\"\n  }\n}"
+    },
+    {
+      "name": "memory_agent",
+      "role": "Maintain shared memory, summarize collaboration, and preserve useful context.",
+      "model": "qwen2.5-coder:7b",
+      "prompt": "You are the memory_agent. Keep compact shared context for the team: decisions, assumptions, tool outcomes, and next useful facts."
+    }
+  ],
+  "architecture_summary": "",
+  "repo_analysis_round": 0,
+  "strategy_change_required": false,
+  "strategy_change_reason": "",
+  "blocked_retry": null,
+  "last_tool_analysis": null,
+  "last_repo_analysis": null,
+  "query_cache": {
+    "checked": false,
+    "hit": false,
+    "confidence": 0.0,
+    "matches": []
+  },
+  "cache_context": "",
+  "osint_context": "",
+  "last_osint_ingestion": null,
+  "self_rewriting": {
+    "status": "ready",
+    "rules": [
+      "agents may propose patches but must not directly modify their own code",
+      "patches require critic_agent and meta_cognition_agent validation before apply",
+      "validated application records behavior updates instead of mutating source code",
+      "prefer measurable improvement and low-risk, stability-preserving changes",
+      "reject patches that create drift, vague behavior changes, or direct code mutation"
+    ],
+    "patch_schema": {
+      "target_agent": "string",
+      "reason": "string",
+      "current_behavior": "string",
+      "proposed_change": "string",
+      "expected_improvement": "string",
+      "risk_assessment": "string"
+    },
+    "pending_patches": [],
+    "validated_patches": [],
+    "applied_patches": [],
+    "rejected_patches": []
+  },
+  "self_healing": {
+    "max_tool_retries": 3,
+    "persistent_failures": 0,
+    "last_failure": null
+  }
+}

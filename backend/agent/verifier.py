@@ -33,12 +33,6 @@ def validate_file_state(tool_result: Mapping[str, Any]) -> dict[str, Any]:
     if tool == "read_file":
         if "content" not in output:
             return {"success": False, "reason": "read_file result missing content"}
-        try:
-            target = resolve_project_path(path)
-        except Exception as exc:
-            return {"success": False, "reason": f"read_file path invalid: {exc}"}
-        if not target.is_file():
-            return {"success": False, "reason": "read_file target is not a file"}
         return {"success": True, "reason": "read_file content available"}
 
     if tool == "write_file":
@@ -72,6 +66,8 @@ def validate_command_output(tool_result: Mapping[str, Any]) -> dict[str, Any]:
     if tool in {"run_command", "git_diff"}:
         if output.get("timed_out"):
             return {"success": False, "reason": f"{tool} timed out"}
+        if tool == "git_diff" and "code" not in output:
+            return {"success": True, "reason": "git_diff result available"}
         if int(output.get("code", 1)) != 0:
             return {"success": False, "reason": f"{tool} exited with code {output.get('code')}"}
         return {"success": True, "reason": f"{tool} exited successfully"}

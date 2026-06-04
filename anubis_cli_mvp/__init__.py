@@ -1,5 +1,4 @@
-"""Initial modular ANUBIS CLI implementation."""
+"""Backward-compatible alias for the renamed :mod:`cli_mvp` package."""
 
-from anubis_cli_mvp.app import AnubisCLI
-
-__all__ = ["AnubisCLI"]
+from cli_mvp import *  # noqa: F401,F403
+from cli_mvp import __path__ as __path__  # re-export submodule search path

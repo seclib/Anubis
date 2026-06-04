@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import shlex
+import json
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass, field
 from typing import Any
 
 from anubis.agents import CORE_AGENTS, AgentRegistry, SwarmEngine
-from cli.ux import render_block
+from modules.osint import OsintModule
 
 DEFAULT_STATE: dict[str, Any] = {
     "agents": dict(CORE_AGENTS)
@@ -28,7 +29,7 @@ class RouteResult:
     should_continue: bool = True
 
     def render(self) -> str:
-        return render_block(self.task, self.status, self.result)
+        return _render_route_result(self)
 
 
 CommandHandler = Callable[[ParsedCommand], RouteResult]
@@ -46,6 +47,7 @@ class CommandRouter:
         self.state = state if state is not None else self._new_state()
         self.agents = AgentRegistry(self.state)
         self.swarm = SwarmEngine(self.agents)
+        self.osint = OsintModule()
         self.handlers: dict[str, CommandHandler] = {}
         self.register_defaults()
 
@@ -68,6 +70,7 @@ class CommandRouter:
             "/build": self._build,
             "/analyze": self._analyze,
             "/research": self._research,
+            "/osint": self._osint,
             "/agent": self._agent,
             "/swarm": self._swarm,
         }.items():
@@ -128,6 +131,7 @@ class CommandRouter:
                 "  /build <task>",
                 "  /analyze <input>",
                 "  /research <query>",
+                "  /osint <target>",
                 "agents:",
                 "  /agent spawn <name>",
                 "  /agent list",
@@ -176,6 +180,20 @@ class CommandRouter:
         self._set_agent("researcher", "completed")
         return RouteResult(f"Research {query}", self.agent_states, f"research brief prepared: {query}")
 
+    def _osint(self, command: ParsedCommand) -> RouteResult:
+        target = command.raw_args.strip()
+        if not target:
+            return RouteResult("Validate command", self.agent_states, "osint target required")
+
+        self._set_agent("osint", "running")
+        execution = self.osint.run(target)
+        self._set_agent("osint", "completed")
+        return RouteResult(
+            f"OSINT {target}",
+            self.agent_states,
+            json.dumps(execution.report.to_dict(), indent=2, ensure_ascii=False),
+        )
+
     def _agent(self, command: ParsedCommand) -> RouteResult:
         if not command.args:
             return RouteResult("AGENT SYSTEM", self.agent_states, "usage: /agent spawn <name> | /agent list")
@@ -204,3 +222,34 @@ class CommandRouter:
 
 
 __all__ = ["CommandHandler", "CommandRouter", "ParsedCommand", "RouteResult"]
+
+
+def _render_route_result(result: RouteResult) -> str:
+    return "\n".join(
+        [
+            "TASK:",
+            _clean(result.task),
+            "",
+            "STATUS:",
+            _render_status(result.status),
+            "",
+            "RESULT:",
+            _clean(result.result),
+            "",
+        ]
+    )
+
+
+def _render_status(status: dict[str, str] | str) -> str:
+    if isinstance(status, str):
+        return _clean(status)
+    if "__logs__" in status:
+        return _clean(status["__logs__"])
+    if not status:
+        return "ready"
+    return "\n".join(f"{key}: {status[key]}" for key in sorted(status))
+
+
+def _clean(value: object) -> str:
+    text = str(value).strip()
+    return text or "none"

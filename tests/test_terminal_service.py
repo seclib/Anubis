@@ -83,6 +83,36 @@ class TerminalServiceTest(unittest.TestCase):
             self.assertFalse(result.command.success)
             self.assertIn("shell control", result.command.output)
 
+    def test_terminal_rejects_destructive_commands(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            service = self.service(root)
+            session = service.create_session("task-destructive")
+
+            result = service.run_command(session.session_id, "rm -rf /tmp/anubis-nope")
+
+            self.assertFalse(result.command.success)
+            self.assertIn("forbidden command", result.command.output)
+
+    def test_terminal_rejects_absolute_host_paths(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            service = self.service(root)
+            session = service.create_session("task-host-path")
+
+            result = service.run_command(session.session_id, "cat /etc/passwd")
+
+            self.assertFalse(result.command.success)
+            self.assertIn("absolute host paths", result.command.output)
+
+    def test_terminal_rejects_inline_execution_flags(self) -> None:
+        with tempfile.TemporaryDirectory() as root:
+            service = self.service(root)
+            session = service.create_session("task-inline")
+
+            result = service.run_command(session.session_id, "python3 -c 'print(123)'")
+
+            self.assertFalse(result.command.success)
+            self.assertIn("inline execution", result.command.output)
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -329,6 +329,7 @@ def _run_command(context: SandboxContext, command: str) -> tuple[str, int]:
     if not tokens:
         raise SandboxViolation("command is required")
     _reject_shell_surface(command)
+    _reject_unsafe_command_tokens(tokens)
     completed = subprocess.run(
         tokens,
         cwd=context.workspace,
@@ -379,6 +380,60 @@ def _reject_shell_surface(command: str) -> None:
     for marker in (";", "&&", "||", "|", "`", "$(", "<(", ">(", "\n", "\r"):
         if marker in command:
             raise SandboxViolation(f"shell control or expansion is not allowed: {marker}")
+
+
+FORBIDDEN_COMMANDS = {
+    "apt",
+    "apt-get",
+    "chmod",
+    "chown",
+    "chroot",
+    "dd",
+    "docker",
+    "kill",
+    "mkfs",
+    "mount",
+    "mv",
+    "pkill",
+    "podman",
+    "reboot",
+    "rm",
+    "rmdir",
+    "service",
+    "shutdown",
+    "su",
+    "sudo",
+    "systemctl",
+    "umount",
+}
+
+INLINE_EXEC_FLAGS = {
+    "bash": {"-c", "-lc"},
+    "dash": {"-c"},
+    "node": {"-e", "--eval"},
+    "perl": {"-e"},
+    "php": {"-r"},
+    "python": {"-c"},
+    "python3": {"-c"},
+    "ruby": {"-e"},
+    "sh": {"-c"},
+}
+
+
+def _reject_unsafe_command_tokens(tokens: list[str]) -> None:
+    command = Path(tokens[0]).name.lower()
+    if command in FORBIDDEN_COMMANDS:
+        raise SandboxViolation(f"forbidden command: {command}")
+
+    blocked_inline_flags = INLINE_EXEC_FLAGS.get(command, set())
+    if blocked_inline_flags and any(token in blocked_inline_flags for token in tokens[1:3]):
+        raise SandboxViolation(f"inline execution is not allowed for {command}")
+
+    for token in tokens:
+        if token.startswith("-"):
+            continue
+        if Path(token).is_absolute():
+            raise SandboxViolation(f"absolute host paths are not allowed: {token}")
 
 
 def _sandbox_env(context: SandboxContext) -> dict[str, str]:

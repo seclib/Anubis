@@ -20,4 +20,4 @@ dependencies = [
 anubis = "anubis.cli.main:main"
 
 [tool.setuptools.packages.find]
-include = ["cli*", "backend*"]
+include = ["anubis*", "backend*"]
