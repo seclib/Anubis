@@ -1,7 +1,7 @@
 from __future__ import annotations
 
-import shlex
 import json
+import shlex
 from collections.abc import Callable, MutableMapping
 from dataclasses import dataclass, field
 from typing import Any
@@ -186,7 +186,11 @@ class CommandRouter:
             return RouteResult("Validate command", self.agent_states, "osint target required")
 
         self._set_agent("osint", "running")
-        execution = self.osint.run(target)
+        try:
+            execution = self.osint.run(target)
+        except Exception as exc:
+            self._set_agent("osint", "failed")
+            return RouteResult(f"OSINT {target}", self.agent_states, f"osint execution failed: {exc}")
         self._set_agent("osint", "completed")
         return RouteResult(
             f"OSINT {target}",

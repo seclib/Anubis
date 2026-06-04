@@ -1,6 +1,7 @@
 import unittest
 
 from cli.router import CommandRouter
+from modules.osint.schemas import AdapterExecution, IdentityReport, OsintReport
 
 
 class CommandRouterTest(unittest.TestCase):
@@ -68,6 +69,19 @@ class CommandRouterTest(unittest.TestCase):
         self.assertIn("aggregate: combined swarm result prepared", result.result)
         self.assertEqual(result.status["orchestrator"], "active")
 
+    def test_osint_routes_to_native_module(self) -> None:
+        router = CommandRouter()
+        router.osint = FakeOsintModule()
+
+        result = router.route("/osint @username")
+
+        self.assertIsNotNone(result)
+        assert result is not None
+        self.assertEqual(result.task, "OSINT @username")
+        self.assertEqual(result.status["osint"], "completed")
+        self.assertIn('"usernames": [', result.result)
+        self.assertIn('"username"', result.result)
+
     def test_exit_stops_loop(self) -> None:
         result = CommandRouter().route("/exit")
 
@@ -75,6 +89,11 @@ class CommandRouterTest(unittest.TestCase):
         assert result is not None
         self.assertFalse(result.should_continue)
         self.assertEqual(result.result, "session closed")
+
+
+class FakeOsintModule:
+    def run(self, target: str) -> AdapterExecution:
+        return AdapterExecution(report=OsintReport(identity=IdentityReport(usernames=[target.lstrip("@")])))
 
 
 if __name__ == "__main__":
