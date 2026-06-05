@@ -1,0 +1,7 @@
+pipeline: lint
+workflow: .github/workflows/lint-pipeline.yml
+checks:
+  - python_compile
+  - ruff_critical_lint
+  - text_formatting_guard
+blocking: true

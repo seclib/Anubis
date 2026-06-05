@@ -1,0 +1,126 @@
+name: test-pipeline
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: test-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit-tests:
+    name: Unit tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Compile Python modules
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m compileall -q \
+            bootstrap.py core src agents tests tools scripts
+
+      - name: Run deterministic test runner
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: "src:."
+        run: python3 scripts/run_tests.py
+
+  integration-tests:
+    name: Integration tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: unit-tests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run bootstrap pipeline
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: "src:."
+        run: python3 bootstrap.py "Investigate CI integration anomaly" --source ci
+
+      - name: Validate Docker Compose configuration
+        run: docker compose config --quiet
+
+      - name: Build hardened container
+        run: docker build --pull=false -t anubis:ci .
+
+      - name: Run hardened container smoke test
+        run: docker compose run --rm anubis
+
+  sandbox-tests:
+    name: Sandbox execution tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    needs: unit-tests
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Run sandbox probe
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: "src:."
+        run: python3 tools/sandbox_tester.py
+
+      - name: Run sandbox-focused tests
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: "src:."
+        run: |
+          python3 - <<'PY'
+          import asyncio
+          import importlib.util
+          import inspect
+          import traceback
+          from pathlib import Path
+
+          async def run_one(fn):
+              result = fn()
+              if inspect.isawaitable(result):
+                  await result
+
+          async def main():
+              failures = []
+              for path in (Path("tests/test_sandbox.py"), Path("tests/test_execution.py")):
+                  spec = importlib.util.spec_from_file_location(path.stem, path)
+                  module = importlib.util.module_from_spec(spec)
+                  spec.loader.exec_module(module)
+                  for name, fn in sorted(vars(module).items()):
+                      if name.startswith("test_") and callable(fn):
+                          try:
+                              await run_one(fn)
+                              print(f"PASS {path.name}::{name}")
+                          except Exception:
+                              failures.append(f"{path.name}::{name}")
+                              traceback.print_exc()
+              if failures:
+                  raise SystemExit(f"Sandbox test failures: {failures}")
+
+          asyncio.run(main())
+          PY

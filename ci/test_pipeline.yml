@@ -1,0 +1,9 @@
+pipeline: test
+workflow: .github/workflows/test-pipeline.yml
+jobs:
+  - unit_tests
+  - integration_tests
+  - sandbox_execution_tests
+blocking: true
+deployment:
+  automatic_production_deployment: false

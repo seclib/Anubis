@@ -1,0 +1,63 @@
+name: auto-refactor-proposal
+
+on:
+  workflow_dispatch:
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: auto-refactor-proposal-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  proposal:
+    name: Generate review-only refactor proposal
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Compile
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m compileall -q \
+            bootstrap.py core src agents tests tools scripts
+
+      - name: Test
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: "src:."
+        run: python3 scripts/run_tests.py
+
+      - name: Analyze architecture
+        env:
+          PYTHONPATH: "src:."
+        run: python3 tools/code_analyzer.py > anubis-refactor-proposal.txt
+
+      - name: Append safety policy
+        run: |
+          cat >> anubis-refactor-proposal.txt <<'EOF'
+
+          Auto-refactor safety policy:
+          - proposal only
+          - no source edits
+          - no generated code execution
+          - no auto-commit
+          - no auto-push
+          - no auto-merge
+          - no deployment
+          - human review required
+          EOF
+
+      - name: Upload review artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: anubis-refactor-proposal
+          path: anubis-refactor-proposal.txt

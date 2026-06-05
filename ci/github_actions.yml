@@ -1,0 +1,9 @@
+workflows:
+  test_pipeline: .github/workflows/test-pipeline.yml
+  security_pipeline: .github/workflows/security-pipeline.yml
+  lint_pipeline: .github/workflows/lint-pipeline.yml
+  release_approval: .github/workflows/release-approval.yml
+
+policy:
+  automatic_production_deployment: false
+  release_requires_manual_environment_approval: true

@@ -1,0 +1,102 @@
+name: security-pipeline
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  security-events: write
+
+concurrency:
+  group: security-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  security-scan:
+    name: Security scan
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Runtime dependency scan
+        run: python3 tools/dependency_scanner.py
+
+      - name: Static architecture scan
+        run: python3 tools/code_analyzer.py
+
+      - name: Sandbox security probe
+        env:
+          PYTHONPATH: "src:."
+        run: python3 tools/sandbox_tester.py
+
+      - name: Validate production hardening policies
+        run: python3 tools/hardening_validator.py
+
+      - name: Detect forbidden CI/CD deployment behavior
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          forbidden = (
+              "kubectl apply",
+              "helm upgrade",
+              "terraform apply",
+              "aws deploy",
+              "gcloud deploy",
+              "az deployment",
+              "docker push",
+          )
+          roots = [Path(".github"), Path("ci"), Path("scripts"), Path("Makefile"), Path("Dockerfile"), Path("docker-compose.yml")]
+          ignored = {Path(".github/workflows/security-pipeline.yml")}
+          findings = []
+          for root in roots:
+              paths = [root] if root.is_file() else list(root.rglob("*")) if root.exists() else []
+              for path in paths:
+                  if path in ignored or not path.is_file():
+                      continue
+                  text = path.read_text(encoding="utf-8", errors="ignore").lower()
+                  for token in forbidden:
+                      if token in text:
+                          findings.append(f"{path}: contains forbidden deployment command '{token}'")
+          if findings:
+              print("\n".join(findings))
+              raise SystemExit(1)
+          PY
+
+      - name: Validate Docker runtime hardening
+        run: |
+          docker compose config > /tmp/anubis-compose.yml
+          grep -q 'network_mode: none' /tmp/anubis-compose.yml
+          grep -q 'read_only: true' /tmp/anubis-compose.yml
+          grep -q 'no-new-privileges:true' /tmp/anubis-compose.yml
+          grep -q 'cap_drop:' /tmp/anubis-compose.yml
+          grep -q 'pids_limit: 128' /tmp/anubis-compose.yml
+
+  codeql:
+    name: CodeQL Python analysis
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      security-events: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3

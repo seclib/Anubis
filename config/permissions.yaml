@@ -1,0 +1,38 @@
+default: deny
+policy:
+  wildcard_permissions: denied
+  explicit_deny_precedence: true
+  direct_system_access: denied
+  source_modification: denied
+  runtime_code_injection: denied
+  generated_code_execution: denied
+  plugin_execution_requires:
+    - registered_plugin
+    - started_plugin
+    - sandbox_guard
+    - manifest_permissions
+grants:
+  watcher:
+    - telemetry.read
+    - observe
+  thinker:
+    - reason.plan
+    - triage
+  executor:
+    - execute
+    - policy.evaluate
+  healer:
+    - recover
+    - rollback
+  predator:
+    - defend
+    - anomaly.kill_switch
+    - policy.evaluate
+denies:
+  all_agents:
+    - source.modify
+    - os.exec
+    - subprocess.spawn
+    - network.raw
+    - filesystem.host
+    - plugin.dynamic_import

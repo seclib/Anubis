@@ -1,0 +1,7 @@
+environment: development
+local_first: true
+evolution:
+  enabled: false
+  apply: false
+research_swarm:
+  enabled: true

@@ -160,6 +160,7 @@ class PlanningEngine:
                 kind=step.task_kind,
                 payload={
                     **dict(step.payload),
+                    "objective": plan.goal.objective,
                     "goal_id": plan.goal.id,
                     "plan_id": plan.id,
                     "step_id": step.id,

@@ -1,0 +1,88 @@
+profile: production
+mode: local_first_restricted
+
+container_isolation:
+  user: "10001:10001"
+  root_filesystem: read_only
+  writable_paths:
+    - path: /tmp
+      type: tmpfs
+      options:
+        - noexec
+        - nosuid
+        - nodev
+      size: 16m
+  linux_capabilities:
+    drop:
+      - ALL
+    add: []
+  privilege_escalation: denied
+  privileged_mode: denied
+  network:
+    default: none
+    explicit_profile: network-enabled
+    requires_permission: network.explicit
+  resource_limits:
+    cpus: 1.0
+    memory: 512m
+    memory_swap: 512m
+    pids: 128
+    nofile_soft: 1024
+    nofile_hard: 1024
+
+permission_boundaries:
+  default: deny
+  wildcard_permissions: denied
+  explicit_deny_precedence: true
+  source_modification: denied
+  direct_os_access: denied
+  plugin_execution:
+    requires_registered_plugin: true
+    requires_started_plugin: true
+    requires_sandbox_guard: true
+    requires_manifest_permissions: true
+  allowed_read_only_when_kill_switch_active:
+    - security.status.read
+    - audit.read
+
+execution_limits:
+  sandbox_required: true
+  max_task_timeout_seconds: 30
+  max_memory_mb: 256
+  max_retries: 2
+  rollback_required_on_final_failure: true
+  network_default: denied
+  filesystem_default: sandbox_only
+  generated_code_execution: denied
+  runtime_code_injection: denied
+
+abuse_protection:
+  arbitrary_code_execution:
+    denied_patterns:
+      - exec
+      - eval
+      - importlib
+      - __import__
+      - subprocess
+      - os.system
+    enforcement:
+      - code_review
+      - ci_security_pipeline
+      - plugin_loader_manifest_only
+      - sandbox_guard
+  plugin_abuse:
+    manifest_only_loader: true
+    no_dynamic_imports: true
+    no_runtime_dependency_install: true
+    structured_input_output_only: true
+    audit_every_execution: true
+  sandbox_escape_attempts:
+    block_source_modify_permission: true
+    block_non_sandbox_filesystem: true
+    trigger_kill_switch_on_critical_findings: true
+
+release_controls:
+  automatic_production_deployment: false
+  self_triggered_production_changes: false
+  manual_approval_required: true
+  approval_environment: production-release

@@ -1,0 +1,2 @@
+"""Living memory adapters."""
+

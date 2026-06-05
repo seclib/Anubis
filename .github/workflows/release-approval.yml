@@ -1,0 +1,47 @@
+name: release-approval
+
+on:
+  workflow_dispatch:
+    inputs:
+      release_version:
+        description: "Human-reviewed release version or tag"
+        required: true
+        type: string
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-approval-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  manual-approval-gate:
+    name: Manual release approval gate
+    runs-on: ubuntu-24.04
+    environment: production-release
+    timeout-minutes: 15
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+
+      - name: Re-run deterministic validation
+        env:
+          PYTHONDONTWRITEBYTECODE: "1"
+          PYTHONPATH: "src:."
+        run: |
+          python3 -m compileall -q bootstrap.py core src agents tests tools scripts
+          python3 scripts/run_tests.py
+          python3 tools/dependency_scanner.py
+          python3 tools/sandbox_tester.py
+          docker compose config --quiet
+
+      - name: Confirm no automatic deployment occurs
+        run: |
+          echo "Release candidate '${{ inputs.release_version }}' validated."
+          echo "No production deployment, push, publish, or infrastructure change is performed by this workflow."

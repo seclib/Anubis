@@ -1,0 +1,67 @@
+name: lint-pipeline
+
+on:
+  push:
+    branches: ["main", "master"]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: lint-pipeline-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint:
+    name: Lint and format
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.13"
+          cache: pip
+
+      - name: Install lint tooling
+        run: python3 -m pip install --disable-pip-version-check "ruff==0.8.6"
+
+      - name: Compile Python modules
+        run: |
+          PYTHONDONTWRITEBYTECODE=1 python3 -m compileall -q \
+            bootstrap.py core src agents tests tools scripts
+
+      - name: Ruff critical lint check
+        run: ruff check --select E9,F63,F7,F82 bootstrap.py core src agents tests tools scripts
+
+      - name: Text formatting guard
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+
+          roots = [Path(".github"), Path("ci"), Path("config"), Path("core"), Path("src"), Path("agents"), Path("tests"), Path("tools"), Path("scripts")]
+          suffixes = {".py", ".yml", ".yaml", ".toml", ".md", ".txt"}
+          failures = []
+          for root in roots:
+              if not root.exists():
+                  continue
+              for path in root.rglob("*"):
+                  if not path.is_file() or path.suffix not in suffixes:
+                      continue
+                  text = path.read_text(encoding="utf-8")
+                  if text and not text.endswith("\n"):
+                      failures.append(f"{path}: missing final newline")
+                  for index, line in enumerate(text.splitlines(), start=1):
+                      if line.rstrip() != line:
+                          failures.append(f"{path}:{index}: trailing whitespace")
+                      if "\t" in line:
+                          failures.append(f"{path}:{index}: tab character")
+          if failures:
+              print("\n".join(failures))
+              raise SystemExit(1)
+          PY

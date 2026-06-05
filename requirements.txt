@@ -1,0 +1,2 @@
+# ANUBIS runtime intentionally uses the Python standard library only.
+# Development/test tools are declared in pyproject.toml optional dependencies.

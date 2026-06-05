@@ -1,0 +1,28 @@
+default_profile:
+  name: restricted-default
+  mode: restricted
+  filesystem: scratch
+  network: deny
+  timeout_seconds: 30
+  memory_mb: 256
+  cpu_quota: 1.0
+  pids_limit: 128
+  writable_paths:
+    - /tmp
+  readonly_root: true
+  no_new_privileges: true
+  linux_capabilities:
+    drop:
+      - ALL
+    add: []
+  blocked_permissions:
+    - source.modify
+    - filesystem.host
+    - network.raw
+    - os.exec
+    - subprocess.spawn
+escape_detection:
+  non_sandbox_filesystem: critical
+  source_modification_attempt: critical
+  repeated_denials_threshold: 3
+  action: kill_switch

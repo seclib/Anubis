@@ -1,0 +1,12 @@
+runtime_agents:
+  - watcher
+  - thinker
+  - executor
+  - healer
+  - predator
+research_agents:
+  - research_planner
+  - research_executor
+  - research_analyst
+  - research_critic
+  - research_synthesizer

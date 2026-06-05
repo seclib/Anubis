@@ -1,0 +1,12 @@
+pipeline: security
+workflow: .github/workflows/security-pipeline.yml
+checks:
+  - runtime_dependency_scan
+  - static_architecture_scan
+  - sandbox_security_probe
+  - production_hardening_policy_validation
+  - forbidden_deployment_command_guard
+  - docker_runtime_hardening_validation
+  - codeql_python_analysis
+deployment:
+  automatic_production_deployment: false

@@ -1,0 +1,7 @@
+mutation_rules:
+  - id: low_risk_docstring
+    description: Add missing architectural docstrings.
+    max_risk: low
+  - id: require_base_hash
+    description: All proposed patches require base-hash validation and human approval.
+    max_risk: low

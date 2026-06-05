@@ -1,0 +1,22 @@
+name: auto-refactor-proposal
+
+purpose: >
+  Review-only CI workflow for architecture analysis and refactor proposal
+  generation. This pipeline never modifies source, never pushes commits,
+  never merges pull requests, and never deploys.
+
+safety:
+  mode: proposal_only
+  auto_commit: false
+  auto_push: false
+  auto_merge: false
+  auto_deploy: false
+  requires_human_review: true
+
+steps:
+  - compile_python
+  - run_tests
+  - run_architecture_scan
+  - run_security_scan
+  - generate_refactor_report
+  - upload_review_artifact

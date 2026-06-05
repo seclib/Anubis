@@ -1,0 +1,6 @@
+version: 1
+level: INFO
+format: json
+events:
+  persist: in_memory
+  replay_enabled: true

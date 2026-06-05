@@ -1,0 +1,8 @@
+name: ANUBIS
+purpose: local-first autonomous cyber defense and AI orchestration
+principles:
+  - local-first
+  - least-authority
+  - auditable
+  - defensive-autonomy
+

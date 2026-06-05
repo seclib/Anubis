@@ -1,0 +1,69 @@
+audit_logging:
+  enabled: true
+  mode: append_only
+  integrity: hash_chain
+  structured_format: json
+  clock: utc
+
+required_events:
+  orchestration:
+    - input.accepted
+    - input.rejected
+    - state.planned
+    - state.running
+    - execution.completed
+    - execution.failed
+  security:
+    - permission.allowed
+    - permission.denied
+    - sandbox.allowed
+    - sandbox.denied
+    - kill_switch.triggered
+    - threat.finding
+  plugins:
+    - plugin.registered
+    - plugin.started
+    - plugin.stopped
+    - plugin.executed
+    - plugin.denied
+    - plugin.failed
+  memory:
+    - memory.appended
+    - memory.retrieved
+    - secret.storage.denied
+
+required_fields:
+  - timestamp
+  - sequence
+  - actor
+  - action
+  - resource
+  - allowed
+  - reason
+  - trace_id
+  - metadata
+
+retention:
+  minimum_days: 90
+  production_recommended_days: 365
+  deletion_policy: manual_review_required
+
+redaction:
+  enabled: true
+  redact_fields:
+    - token
+    - password
+    - secret
+    - private_key
+    - credential
+
+alerts:
+  repeated_denials:
+    threshold: 3
+    action: trigger_kill_switch
+  sandbox_escape_attempt:
+    threshold: 1
+    action: trigger_kill_switch
+  source_modification_attempt:
+    threshold: 1
+    action: trigger_kill_switch

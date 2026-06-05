@@ -1,0 +1,51 @@
+name: anubis
+
+x-anubis-common: &anubis-common
+  build:
+    context: .
+    dockerfile: Dockerfile
+    args:
+      PYTHON_IMAGE: python:3.13.5-slim-bookworm@sha256:4c2cf9917bd1cbacc5e9b07320025bdb7cdf2df7b0ceaccb55e9dd7e30987419
+  image: anubis:local
+  user: "10001:10001"
+  read_only: true
+  init: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  pids_limit: 128
+  mem_limit: 512m
+  memswap_limit: 512m
+  cpus: 1.0
+  ulimits:
+    nofile:
+      soft: 1024
+      hard: 1024
+    nproc: 128
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=16m,uid=10001,gid=10001,mode=1777
+  environment:
+    ANUBIS_ENV: production
+    ANUBIS_LOG_LEVEL: INFO
+    ANUBIS_NETWORK: disabled
+    ANUBIS_SANDBOX: enforced
+  restart: "no"
+
+services:
+  anubis:
+    <<: *anubis-common
+    network_mode: "none"
+    command: ["Investigate local authentication anomaly", "--source", "docker"]
+
+  # Explicit opt-in variant for future integrations that truly require egress.
+  # Run only with: docker compose --profile network-enabled up anubis-network-enabled
+  anubis-network-enabled:
+    <<: *anubis-common
+    profiles: ["network-enabled"]
+    command: ["Investigate local authentication anomaly", "--source", "docker-network-enabled"]
+    environment:
+      ANUBIS_ENV: production
+      ANUBIS_LOG_LEVEL: INFO
+      ANUBIS_NETWORK: explicit
+      ANUBIS_SANDBOX: enforced
