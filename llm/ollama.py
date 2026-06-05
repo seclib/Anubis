@@ -71,4 +71,19 @@ class OllamaClient:
         return "".join(self.stream_chat(model, messages))
 
 
-__all__ = ["OllamaClient", "OllamaRouter", "RoutedModel"]
+def call_chat(
+    messages: list[dict[str, str]],
+    *,
+    model: str | None = None,
+    temperature: float = 0.2,
+    max_tokens: int = 1200,
+    host: str | None = None,
+    timeout: int = 120,
+) -> str:
+    selected_model = model or os.environ.get("OLLAMA_MODEL") or os.environ.get("ANUBIS_OLLAMA_MODEL") or "qwen2.5-coder:7b"
+    payload_messages = list(messages)
+    _ = (temperature, max_tokens)
+    return OllamaClient(host=host, timeout=timeout).chat(selected_model, payload_messages)
+
+
+__all__ = ["OllamaClient", "OllamaRouter", "RoutedModel", "call_chat"]

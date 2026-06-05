@@ -1,4 +1,4 @@
-from anubis.agents.swarm import (
+from agent.swarm import (
     AgentDispatcher,
     AgentExecutor,
     SwarmAgentResult,

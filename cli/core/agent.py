@@ -795,7 +795,7 @@ class AnubisCLI:
             )
             return True
         if command == "/clear":
-            os.system("cls" if os.name == "nt" else "clear")
+            self.terminal.line("\033[2J\033[H")
             return True
         if command == "/sync":
             self.terminal.status("sync: indexing Obsidian vault")

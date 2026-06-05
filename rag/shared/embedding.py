@@ -3,6 +3,7 @@ from __future__ import annotations
 import hashlib
 import logging
 import math
+import os
 from functools import lru_cache
 from typing import Iterable
 
@@ -17,6 +18,7 @@ class EmbeddingPipeline:
         self.model_name = model_name or config.embedding_model
         self.dimensions = fallback_dimensions
         self._model = None
+        self.provider = os.getenv("ANUBIS_RAG_EMBEDDING_PROVIDER", "hash").strip().lower()
 
     @property
     def model(self):
@@ -30,6 +32,8 @@ class EmbeddingPipeline:
     @lru_cache(maxsize=50000)
     def embed(self, text: str) -> list[float]:
         clean = self._prepare(text)
+        if self.provider in {"hash", "fallback", "deterministic"}:
+            return self._fallback_embed(clean)
         try:
             vector = self.model.encode(clean, normalize_embeddings=True)
             return [float(value) for value in vector.tolist()]
@@ -39,6 +43,8 @@ class EmbeddingPipeline:
 
     def embed_batch(self, texts: Iterable[str], batch_size: int = 64) -> list[list[float]]:
         items = [self._prepare(text) for text in texts]
+        if self.provider in {"hash", "fallback", "deterministic"}:
+            return [self._fallback_embed(text) for text in items]
         vectors: list[list[float]] = []
         for start in range(0, len(items), batch_size):
             batch = items[start : start + batch_size]

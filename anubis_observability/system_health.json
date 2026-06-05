@@ -1,0 +1,35 @@
+{
+  "generated_at": "2026-06-05T08:22:00+00:00",
+  "status": "GREEN",
+  "green_cycles": 3,
+  "canaries": {
+    "cli_status": "pass",
+    "import_boot": "pass",
+    "rag_pipeline": "pass",
+    "orchestrator": "pass",
+    "security_validation": "pass",
+    "docker_compose_config": "pass"
+  },
+  "test_results": {
+    "pytest": {
+      "status": "pass",
+      "tests": 416,
+      "warnings": 10
+    },
+    "scripts_check": {
+      "status": "pass",
+      "tests": 416,
+      "desktop_build": "skipped: desktop/node_modules not found"
+    },
+    "focused_canary": {
+      "status": "pass",
+      "tests": 15
+    }
+  },
+  "risk_level": "YELLOW_ARCHITECTURE_DEBT",
+  "notes": [
+    "Runtime and tests are green.",
+    "Production architecture still has duplicate systems that must be consolidated under AGENTS.md.",
+    "No rollback was required during Swarm v3 cycles."
+  ]
+}

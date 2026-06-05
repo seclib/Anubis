@@ -4,8 +4,8 @@ from collections.abc import Iterable
 from typing import Protocol
 from uuid import NAMESPACE_URL, uuid5
 
-from anubis.context.embeddings import EmbeddingProvider, HashEmbeddingProvider, cosine_similarity
-from anubis.memory.schema import MemoryCollection, MemoryRecord, MemorySearchResult
+from context.embeddings import EmbeddingProvider, HashEmbeddingProvider, cosine_similarity
+from memory.schema import MemoryCollection, MemoryRecord, MemorySearchResult
 
 
 class MemoryVectorStore(Protocol):

@@ -47,11 +47,11 @@ def _run_git(args: list[str], *, check: bool = False) -> subprocess.CompletedPro
 
 
 def _run_validation_command(command: str) -> dict[str, Any]:
-    validate_command(command)
+    tokens = validate_command(command)
     result = subprocess.run(
-        command,
+        tokens,
         cwd=str(workspace_root()),
-        shell=True,
+        shell=False,
         capture_output=True,
         text=True,
         timeout=TOOL_COMMAND_TIMEOUT,

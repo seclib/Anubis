@@ -5,7 +5,6 @@ import argparse
 import json
 import logging
 
-from pipelines.update_pipeline import UpdatePipeline
 from rag.shared.embedding import EmbeddingService
 from rag.shared.config import config
 from rag.shared.query_router import RagRouter, RoutePlan
@@ -117,11 +116,15 @@ def main() -> None:
     args = parser.parse_args()
 
     if args.command == "ingest-demo":
+        from pipelines.update_pipeline import UpdatePipeline
+
         total = UpdatePipeline().ingest_demo()
         print(f"Ingested {total} chunks into ANUBIS RAG.")
         return
 
     if args.command == "ingest":
+        from pipelines.update_pipeline import UpdatePipeline
+
         pipeline = UpdatePipeline()
         total = 0
         if args.osint_jsonl:

@@ -1,22 +1,43 @@
-"""System tool layer."""
+"""System tool layer compatibility facade.
 
-from anubis.tools.base import BaseTool, ToolExecutionContext, ToolSpec
-from anubis.tools.defaults import create_default_tool_engine
-from anubis.tools.engine import ToolExecutionEngine
-from anubis.tools.errors import (
-    ToolError,
-    ToolExecutionError,
-    ToolNotFoundError,
-    ToolValidationError,
-)
-from anubis.tools.filesystem import ReadFileTool, WriteFileTool, filesystem_tools
-from anubis.tools.filesystem_tool import FilesystemTool
-from anubis.tools.github_tool import GitHubTool
-from anubis.tools.interfaces import Tool
-from anubis.tools.logging import ToolCallLogger
-from anubis.tools.registry import ToolRegistry
-from anubis.tools.tool_router import ToolRouter, route_tool
-from anubis.tools.web_tool import WebTool
+Keep package import side-effect free so runtime code can import individual
+``tools.*`` modules even while the legacy ``anubis.*`` package layout is being
+migrated.
+"""
+
+_EXPORTS = {
+    "BaseTool": ("tools.base", "BaseTool"),
+    "FilesystemTool": ("tools.filesystem_tool", "FilesystemTool"),
+    "GitHubTool": ("tools.github_tool", "GitHubTool"),
+    "ReadFileTool": ("tools.filesystem", "ReadFileTool"),
+    "Tool": ("tools.interfaces", "Tool"),
+    "ToolCallLogger": ("tools.logging", "ToolCallLogger"),
+    "ToolError": ("tools.errors", "ToolError"),
+    "ToolExecutionContext": ("tools.base", "ToolExecutionContext"),
+    "ToolExecutionEngine": ("tools.engine", "ToolExecutionEngine"),
+    "ToolExecutionError": ("tools.errors", "ToolExecutionError"),
+    "ToolNotFoundError": ("tools.errors", "ToolNotFoundError"),
+    "ToolRegistry": ("tools.registry", "ToolRegistry"),
+    "ToolRouter": ("tools.tool_router", "ToolRouter"),
+    "ToolSpec": ("tools.base", "ToolSpec"),
+    "ToolValidationError": ("tools.errors", "ToolValidationError"),
+    "WebTool": ("tools.web_tool", "WebTool"),
+    "WriteFileTool": ("tools.filesystem", "WriteFileTool"),
+    "create_default_tool_engine": ("tools.defaults", "create_default_tool_engine"),
+    "filesystem_tools": ("tools.filesystem", "filesystem_tools"),
+    "route_tool": ("tools.tool_router", "route_tool"),
+}
+
+
+def __getattr__(name: str):
+    try:
+        module_name, attribute = _EXPORTS[name]
+    except KeyError as exc:
+        raise AttributeError(name) from exc
+    module = __import__(module_name, fromlist=[attribute])
+    value = getattr(module, attribute)
+    globals()[name] = value
+    return value
 
 __all__ = [
     "BaseTool",

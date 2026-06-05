@@ -4,8 +4,8 @@ from collections.abc import Iterable
 from pathlib import Path
 from typing import Any
 
-from anubis.memory.schema import MemoryCollection, MemoryRecord, MemoryWriteResult, MigrationPlan
-from anubis.memory.service import UnifiedMemoryService, memory_hash
+from memory.schema import MemoryCollection, MemoryRecord, MemoryWriteResult, MigrationPlan
+from memory.service import UnifiedMemoryService, memory_hash
 
 
 class MemoryMigrationStrategy:

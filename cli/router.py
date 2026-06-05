@@ -5,7 +5,8 @@ import shlex
 from dataclasses import dataclass, field
 from typing import Any
 
-from registry import ConsoleModule, ModuleRegistry
+from cli.registry import ConsoleModule, ModuleRegistry
+from anubis.core.router import CommandRouter, CommandRouter as CliRouter
 from modules.rag_client import ModuleRagClient
 
 

@@ -5,7 +5,7 @@ from hashlib import sha256
 from typing import Any
 from uuid import uuid5, NAMESPACE_URL
 
-from anubis.memory.schema import (
+from memory.schema import (
     MemoryCollection,
     MemoryRecord,
     MemorySearchQuery,
@@ -13,7 +13,7 @@ from anubis.memory.schema import (
     MemoryWriteResult,
     now_iso,
 )
-from anubis.memory.store import InMemoryMemoryStore, MemoryEmbedder, MemoryVectorStore
+from memory.store import InMemoryMemoryStore, MemoryEmbedder, MemoryVectorStore
 
 
 class UnifiedMemoryService:
@@ -158,6 +158,14 @@ class UnifiedMemoryService:
 def normalize_collection(collection: MemoryCollection | str) -> MemoryCollection:
     if isinstance(collection, MemoryCollection):
         return collection
+    if isinstance(collection, str):
+        return MemoryCollection(collection)
+    value = getattr(collection, "value", None)
+    if value is not None:
+        return MemoryCollection(str(value))
+    name = getattr(collection, "name", None)
+    if name is not None:
+        return MemoryCollection[str(name)]
     return MemoryCollection(str(collection))
 
 

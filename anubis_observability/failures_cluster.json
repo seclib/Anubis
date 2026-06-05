@@ -1,0 +1,59 @@
+{
+  "generated_at": "2026-06-05T08:22:00+00:00",
+  "clusters": {
+    "IMPORT_ERROR": {
+      "count": 0,
+      "status": "resolved",
+      "notes": [
+        "Current boot imports pass for CLI, API, runtime, memory, agent loop, core router, and update pipeline."
+      ]
+    },
+    "CONFIG_ERROR": {
+      "count": 0,
+      "status": "clear",
+      "notes": [
+        "docker compose config validates."
+      ]
+    },
+    "LOGIC_BUG": {
+      "count": 0,
+      "status": "clear",
+      "notes": [
+        "Full test suite passes."
+      ]
+    },
+    "ARCHITECTURE_MISMATCH": {
+      "count": 4,
+      "status": "known-risk",
+      "notes": [
+        "Duplicate CLI/API/agent/RAG/tool paths remain.",
+        "AGENTS.md requires convergence to one canonical runtime.",
+        "Legacy RAG adapters are restored for compatibility but still need consolidation.",
+        "Several direct subprocess and network call sites remain outside a single ToolService."
+      ]
+    },
+    "SECURITY_VIOLATION": {
+      "count": 0,
+      "status": "no-critical-active",
+      "notes": [
+        "Secret scan only matched a test fixture.",
+        "Direct CLI os.system clear command was removed in the prior stability patch.",
+        "Remaining side-effect call sites are classified as hardening targets rather than active regressions."
+      ]
+    },
+    "DEPENDENCY_CONFLICT": {
+      "count": 0,
+      "status": "clear",
+      "notes": [
+        "No missing import or package conflict detected in current canaries."
+      ]
+    },
+    "TEST_INSUFFICIENCY": {
+      "count": 0,
+      "status": "improved",
+      "notes": [
+        "RAG offline embedding and update-pipeline ingestion tests were added in the current stability patch set."
+      ]
+    }
+  }
+}

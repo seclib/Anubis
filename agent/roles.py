@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from anubis.agents.base import AgentState
+from agent.base import AgentState
 
 BUILDER = "builder"
 RESEARCHER = "researcher"

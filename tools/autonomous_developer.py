@@ -172,7 +172,7 @@ def developer_project_status(root: str = ".") -> dict[str, Any]:
 
     if "node" in project_types:
         dependency_command = dependency_command or "npm install"
-        build_command = _node_script_command(package_data, "build") or build_command
+        build_command = build_command or _node_script_command(package_data, "build")
         test_command = _node_script_command(package_data, "test") or test_command
         server_command = (
             _node_script_command(package_data, "dev")
