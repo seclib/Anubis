@@ -8,6 +8,7 @@ from types import MappingProxyType
 from typing import Any, Mapping
 
 from anubis.events import EventBus
+from anubis.sandbox import Sandbox, SandboxRequest
 from anubis.types import AgentRunResult, Event, EventType, Task
 
 TaskExecutor = Callable[[Task], Awaitable[AgentRunResult]]
@@ -72,9 +73,11 @@ class ExecutionLayer:
         *,
         policy: ExecutionPolicy | None = None,
         event_bus: EventBus | None = None,
+        sandbox: Sandbox | None = None,
     ) -> None:
         self.policy = policy or ExecutionPolicy()
         self.event_bus = event_bus
+        self.sandbox = sandbox
 
     async def run(
         self,
@@ -88,6 +91,38 @@ class ExecutionLayer:
         active_policy = policy or self.policy
         last_error: BaseException | None = None
         last_result: AgentRunResult | None = None
+
+        if self.sandbox is not None:
+            decision = self.sandbox.authorize(
+                SandboxRequest(
+                    task=task,
+                    agent_name=agent_name,
+                    requested_capabilities=task.required_capabilities,
+                    metadata=task.metadata,
+                )
+            )
+            await self._publish(
+                EventType.SANDBOX_ALLOWED if decision.allowed else EventType.SANDBOX_DENIED,
+                task,
+                agent_name,
+                {
+                    "allowed": decision.allowed,
+                    "profile": decision.profile.name if decision.profile else None,
+                    "missing_capabilities": list(decision.missing_capabilities),
+                    "explanation": decision.explanation,
+                },
+            )
+            if not decision.allowed:
+                return ExecutionResult(
+                    status=ExecutionStatus.FAILED,
+                    attempts=0,
+                    error=decision.explanation,
+                    metadata={
+                        "agent_name": agent_name,
+                        "sandbox_allowed": False,
+                        "missing_capabilities": decision.missing_capabilities,
+                    },
+                )
 
         for attempt in range(1, active_policy.retry.max_attempts + 1):
             await self._publish(
