@@ -1,11 +1,11 @@
 from __future__ import annotations
 
-from commands import bugbounty, cve, defense, dev, graph, osint, tools
-from commands._rag import route_query
-from commands.system import exit_command, help_command, status_command
-from core.context import CliContext
-from core.dispatcher import CommandDispatcher, CommandResult
-from utils.parser import CommandParser
+from cli.commands import bugbounty, cve, defense, dev, graph, osint, tools
+from cli.commands._rag import route_query
+from cli.commands.system import exit_command, help_command, status_command
+from cli.core.context import CliContext
+from cli.core.dispatcher import CommandDispatcher, CommandResult
+from cli.utils.parser import CommandParser
 
 
 class CliRouter:

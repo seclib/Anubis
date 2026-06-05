@@ -1,9 +1,9 @@
 from __future__ import annotations
 
-from commands._rag import query_rag
-from core.context import CliContext
-from core.dispatcher import CommandResult
-from utils.parser import ParsedCommand
+from cli.commands._rag import query_rag
+from cli.core.context import CliContext
+from cli.core.dispatcher import CommandResult
+from cli.utils.parser import ParsedCommand
 
 
 def handle(command: ParsedCommand, ctx: CliContext) -> CommandResult:

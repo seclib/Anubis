@@ -1,16 +1,8 @@
-"""Unified command router for the ANUBIS CLI.
-
-This replaces the previous ``UnifiedCommandRouter`` that delegated domain
-commands to the legacy ``anubis-cli/`` package via ``anubis_cli_loader``.
-All domain RAG commands are now handled natively through
-``anubis.cli.commands.rag_domains``.
-"""
+"""Unified command router for the ANUBIS CLI Phase 1 surface."""
 from __future__ import annotations
 
-from dataclasses import dataclass
-
-from anubis.cli.commands.rag_domains import DOMAIN_HANDLERS
-from anubis.cli.router import CliRouter
+import os
+import sys
 
 
 LEGACY_CLI_COMMANDS = {
@@ -23,10 +15,10 @@ LEGACY_CLI_COMMANDS = {
 }
 
 
-@dataclass(frozen=True)
 class CommandRouteResult:
-    text: str
-    should_continue: bool = True
+    def __init__(self, text: str, should_continue: bool = True) -> None:
+        self.text = text
+        self.should_continue = should_continue
 
     def render(self) -> str:
         return self.text
@@ -40,8 +32,9 @@ class UnifiedCommandRouter:
     legacy ``anubis-cli`` package.
     """
 
-    def __init__(self, cli_router: CliRouter | None = None) -> None:
-        self.cli_router = cli_router or CliRouter()
+    def __init__(self, cli_router: object | None = None) -> None:
+        self.cli_router = cli_router or _load_cli_router()()
+        self.domain_handlers = _load_domain_handlers()
 
     def route(self, line: str) -> CommandRouteResult | None:
         text = line.strip()
@@ -51,7 +44,7 @@ class UnifiedCommandRouter:
         command = text.split(maxsplit=1)[0].strip().lower()
 
         # Domain RAG commands handled natively
-        handler = DOMAIN_HANDLERS.get(command)
+        handler = self.domain_handlers.get(command)
         if handler is not None:
             query = text[len(command):].strip()
             result = handler(query)
@@ -62,7 +55,45 @@ class UnifiedCommandRouter:
         result = self.cli_router.route(text)
         if result is None:
             return None
-        return CommandRouteResult(result.text, result.should_continue)
+        rendered = result.text if hasattr(result, "text") else result.render()
+        return CommandRouteResult(rendered, result.should_continue)
+
+
+def _project_root() -> str:
+    return os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+
+
+def _without_project_root(callback):
+    root = _project_root()
+    original_path = list(sys.path)
+    sys.path = [
+        path
+        for path in sys.path
+        if path not in {"", root}
+        and os.path.abspath(path or os.getcwd()) != root
+    ]
+    try:
+        return callback()
+    finally:
+        sys.path = original_path
+
+
+def _load_cli_router():
+    def load():
+        from cli.core.router import CliRouter
+
+        return CliRouter
+
+    return _without_project_root(load)
+
+
+def _load_domain_handlers():
+    def load():
+        from cli.commands.rag_domains import DOMAIN_HANDLERS
+
+        return DOMAIN_HANDLERS
+
+    return _without_project_root(load)
 
 
 def _render_result(result: dict) -> str:

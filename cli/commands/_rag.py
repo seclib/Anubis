@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from core.context import CliContext
-from core.dispatcher import CommandResult
-from utils.parser import ParsedCommand
+from cli.core.context import CliContext
+from cli.core.dispatcher import CommandResult
+from cli.utils.parser import ParsedCommand
 
 
 def query_rag(domain: str, command: ParsedCommand, ctx: CliContext) -> CommandResult:

@@ -9,8 +9,6 @@ from __future__ import annotations
 import json
 from typing import Any
 
-from config import QDRANT_URL
-
 
 # ---------------------------------------------------------------------------
 # Domain RAG query

@@ -3,8 +3,8 @@ from __future__ import annotations
 from collections.abc import Callable
 from dataclasses import dataclass
 
-from core.context import CliContext
-from utils.parser import ParsedCommand
+from cli.core.context import CliContext
+from cli.utils.parser import ParsedCommand
 
 
 @dataclass(frozen=True)

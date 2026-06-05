@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.scripts]
-anubis = "anubis.cli.main:main"
+anubis = "cli.main:main"
 
 [tool.setuptools.packages.find]
-include = ["anubis*", "backend*", "modules*"]
+include = ["cli*", "backend*", "modules*"]
