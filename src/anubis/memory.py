@@ -179,6 +179,102 @@ class MemoryIsolationPolicy:
         )
 
 
+class MemoryStoragePolicy:
+    _sensitivity_rank = MemoryIsolationPolicy._sensitivity_rank
+
+    def evaluate(self, record: MemoryRecord) -> StorageDecision:
+        if record.content_type == MemoryContentType.RAW_SECRET:
+            return StorageDecision(
+                allowed=False,
+                requires_encryption=True,
+                reason="Raw secrets cannot be stored inline in shared memory.",
+            )
+
+        if record.content_type in {
+            MemoryContentType.SECRET_REFERENCE,
+            MemoryContentType.CREDENTIAL_REFERENCE,
+        } and record.encryption != EncryptionState.EXTERNAL_REFERENCE:
+            return StorageDecision(
+                allowed=False,
+                requires_encryption=True,
+                reason="Secret and credential memory must be stored as external references.",
+            )
+
+        requires_encryption = (
+            self._sensitivity_rank[record.sensitivity]
+            >= self._sensitivity_rank[Sensitivity.RESTRICTED]
+        )
+        if requires_encryption and record.encryption == EncryptionState.PLAINTEXT:
+            return StorageDecision(
+                allowed=False,
+                requires_encryption=True,
+                reason="Restricted and secret memory must be encrypted or externally referenced.",
+            )
+
+        if record.encryption == EncryptionState.ENCRYPTED and not record.encryption_key_id:
+            return StorageDecision(
+                allowed=False,
+                requires_encryption=True,
+                reason="Encrypted memory requires an encryption_key_id.",
+            )
+
+        return StorageDecision(
+            allowed=True,
+            requires_encryption=requires_encryption,
+            reason="Memory record satisfies storage rules.",
+        )
+
+
+class AgentAccessControl:
+    _sensitivity_rank = MemoryIsolationPolicy._sensitivity_rank
+
+    def __init__(self, grants: Sequence[AgentMemoryGrant] | None = None) -> None:
+        self._grants = {grant.agent_id: grant for grant in grants or ()}
+
+    def grant(self, grant: AgentMemoryGrant) -> None:
+        self._grants[grant.agent_id] = grant
+
+    def can_read(self, access: MemoryAccess, record: MemoryRecord) -> bool:
+        grant = self._grants.get(access.actor_id)
+        if grant is None:
+            return True
+        return self._can_access_grant(
+            grant=grant,
+            record=record,
+            mode=AccessMode.READ,
+        )
+
+    def can_write(self, actor_id: str, record: MemoryRecord) -> bool:
+        grant = self._grants.get(actor_id)
+        if grant is None:
+            return True
+        return self._can_access_grant(
+            grant=grant,
+            record=record,
+            mode=AccessMode.WRITE,
+        )
+
+    def _can_access_grant(
+        self,
+        *,
+        grant: AgentMemoryGrant,
+        record: MemoryRecord,
+        mode: AccessMode,
+    ) -> bool:
+        scopes = grant.readable_scopes if mode == AccessMode.READ else grant.writable_scopes
+        kinds = grant.readable_kinds if mode == AccessMode.READ else grant.writable_kinds
+        if record.scope not in scopes:
+            return False
+        if record.kind not in kinds:
+            return False
+        if record.scope != MemoryScope.GLOBAL and record.scope_id not in grant.scope_ids:
+            return False
+        return (
+            self._sensitivity_rank[record.sensitivity]
+            <= self._sensitivity_rank[grant.max_sensitivity]
+        )
+
+
 @dataclass(frozen=True, slots=True)
 class MemoryKindDefinition:
     kind: MemoryKind
@@ -225,6 +321,8 @@ class SharedMemory:
         *,
         isolation_policy: MemoryIsolationPolicy | None = None,
         kind_policy: MemoryKindPolicy | None = None,
+        storage_policy: MemoryStoragePolicy | None = None,
+        access_control: AgentAccessControl | None = None,
         conflict_strategy: ConflictStrategy = ConflictStrategy.REJECT,
     ) -> None:
         self._records: dict[str, MemoryRecord] = {}
@@ -233,16 +331,35 @@ class SharedMemory:
         self._next_vector_sequence = 1
         self._isolation = isolation_policy or MemoryIsolationPolicy()
         self._kind_policy = kind_policy or MemoryKindPolicy()
+        self._storage_policy = storage_policy or MemoryStoragePolicy()
+        self._access_control = access_control or AgentAccessControl()
         self._conflict_strategy = conflict_strategy
 
     def put(
         self,
         record: MemoryRecord,
         *,
+        actor_id: str | None = None,
         expected_version: int | None = None,
         vector: Sequence[float] | None = None,
         strategy: ConflictStrategy | None = None,
     ) -> ConflictResolution:
+        storage_decision = self._storage_policy.evaluate(record)
+        if not storage_decision.allowed:
+            return ConflictResolution(
+                status=ConflictStatus.POLICY_REJECTED,
+                record=None,
+                conflict_record=record,
+                explanation=storage_decision.reason,
+            )
+        if actor_id is not None and not self._access_control.can_write(actor_id, record):
+            return ConflictResolution(
+                status=ConflictStatus.POLICY_REJECTED,
+                record=None,
+                conflict_record=record,
+                explanation=f"Agent '{actor_id}' is not allowed to write this memory record.",
+            )
+
         current = self._records.get(record.id)
         active_strategy = strategy or self._conflict_strategy
         if current is not None and expected_version is not None and current.version != expected_version:
@@ -263,7 +380,11 @@ class SharedMemory:
 
     def get(self, memory_id: str, access: MemoryAccess) -> MemoryRecord | None:
         record = self._records.get(memory_id)
-        if record is None or not self._isolation.can_access(access, record):
+        if (
+            record is None
+            or not self._isolation.can_access(access, record)
+            or not self._access_control.can_read(access, record)
+        ):
             return None
         return record
 
@@ -274,6 +395,7 @@ class SharedMemory:
                     record
                     for record in self._records.values()
                     if self._isolation.can_access(access, record)
+                    and self._access_control.can_read(access, record)
                 ),
                 key=lambda record: (record.scope, record.scope_id, record.id),
             )
@@ -337,7 +459,11 @@ class SharedMemory:
         results: list[SearchResult] = []
         for memory_id, entry in self._vectors.items():
             record = self._records.get(memory_id)
-            if record is None or not self._isolation.can_access(access, record):
+            if (
+                record is None
+                or not self._isolation.can_access(access, record)
+                or not self._access_control.can_read(access, record)
+            ):
                 continue
             results.append(SearchResult(record=record, score=_cosine_similarity(query, entry.vector)))
         return tuple(

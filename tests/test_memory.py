@@ -1,9 +1,13 @@
 from __future__ import annotations
 
 from anubis import (
+    AgentAccessControl,
+    AgentMemoryGrant,
     ConflictStatus,
     ConflictStrategy,
+    EncryptionState,
     MemoryAccess,
+    MemoryContentType,
     MemoryKind,
     MemoryKindPolicy,
     MemoryRecord,
@@ -242,3 +246,135 @@ def test_procedural_memory_does_not_vector_index_by_default() -> None:
     )
 
     assert memory.search((1, 0), access) == ()
+
+
+def test_storage_rules_reject_raw_secret_inline() -> None:
+    memory = SharedMemory()
+
+    result = memory.put(
+        MemoryRecord(
+            id="mem_secret",
+            content="api-key-123",
+            scope=MemoryScope.AGENT,
+            scope_id="agent-a",
+            owner_id="agent-a",
+            content_type=MemoryContentType.RAW_SECRET,
+            sensitivity=Sensitivity.SECRET,
+        )
+    )
+
+    assert result.status == ConflictStatus.POLICY_REJECTED
+    assert "Raw secrets" in result.explanation
+
+
+def test_storage_rules_require_encryption_for_restricted_memory() -> None:
+    memory = SharedMemory()
+
+    rejected = memory.put(
+        MemoryRecord(
+            id="mem_restricted",
+            content="sensitive timeline",
+            scope=MemoryScope.INCIDENT,
+            scope_id="inc-1",
+            owner_id="agent-a",
+            sensitivity=Sensitivity.RESTRICTED,
+        )
+    )
+    accepted = memory.put(
+        MemoryRecord(
+            id="mem_encrypted",
+            content="ciphertext",
+            scope=MemoryScope.INCIDENT,
+            scope_id="inc-1",
+            owner_id="agent-a",
+            sensitivity=Sensitivity.RESTRICTED,
+            encryption=EncryptionState.ENCRYPTED,
+            encryption_key_id="local-key-1",
+        )
+    )
+
+    assert rejected.status == ConflictStatus.POLICY_REJECTED
+    assert accepted.status == ConflictStatus.NONE
+
+
+def test_secret_and_credential_memory_must_be_external_references() -> None:
+    memory = SharedMemory()
+
+    rejected = memory.put(
+        MemoryRecord(
+            id="mem_cred_bad",
+            content="vault/path",
+            scope=MemoryScope.AGENT,
+            scope_id="agent-a",
+            owner_id="agent-a",
+            content_type=MemoryContentType.CREDENTIAL_REFERENCE,
+            sensitivity=Sensitivity.SECRET,
+            encryption=EncryptionState.ENCRYPTED,
+            encryption_key_id="local-key-1",
+        )
+    )
+    accepted = memory.put(
+        MemoryRecord(
+            id="mem_cred_ok",
+            content="secret://vault/anubis/db",
+            scope=MemoryScope.AGENT,
+            scope_id="agent-a",
+            owner_id="agent-a",
+            content_type=MemoryContentType.CREDENTIAL_REFERENCE,
+            sensitivity=Sensitivity.SECRET,
+            encryption=EncryptionState.EXTERNAL_REFERENCE,
+        )
+    )
+
+    assert rejected.status == ConflictStatus.POLICY_REJECTED
+    assert accepted.status == ConflictStatus.NONE
+
+
+def test_agent_access_control_enforces_write_and_read_grants() -> None:
+    access_control = AgentAccessControl(
+        grants=(
+            AgentMemoryGrant(
+                agent_id="agent-a",
+                readable_scopes=frozenset({MemoryScope.SWARM}),
+                writable_scopes=frozenset({MemoryScope.SWARM}),
+                readable_kinds=frozenset({MemoryKind.SHORT_TERM}),
+                writable_kinds=frozenset({MemoryKind.SHORT_TERM}),
+                scope_ids=frozenset({"swarm-1"}),
+                max_sensitivity=Sensitivity.INTERNAL,
+            ),
+            AgentMemoryGrant(
+                agent_id="agent-b",
+                readable_scopes=frozenset({MemoryScope.SWARM}),
+                writable_scopes=frozenset(),
+                readable_kinds=frozenset({MemoryKind.SHORT_TERM}),
+                writable_kinds=frozenset(),
+                scope_ids=frozenset({"swarm-1"}),
+                max_sensitivity=Sensitivity.INTERNAL,
+            ),
+        )
+    )
+    memory = SharedMemory(access_control=access_control)
+    record = MemoryRecord(
+        id="mem_acl",
+        content="visible",
+        scope=MemoryScope.SWARM,
+        scope_id="swarm-1",
+        owner_id="agent-a",
+        kind=MemoryKind.SHORT_TERM,
+    )
+
+    denied = memory.put(record, actor_id="agent-b")
+    accepted = memory.put(record, actor_id="agent-a")
+    readable = memory.get(
+        "mem_acl",
+        MemoryAccess(
+            actor_id="agent-b",
+            scopes=frozenset({MemoryScope.SWARM}),
+            scope_ids=frozenset({"swarm-1"}),
+            max_sensitivity=Sensitivity.INTERNAL,
+        ),
+    )
+
+    assert denied.status == ConflictStatus.POLICY_REJECTED
+    assert accepted.status == ConflictStatus.NONE
+    assert readable == record
