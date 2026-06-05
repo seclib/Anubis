@@ -345,7 +345,7 @@ initialize_rag() {
 
   info "Initializing RAG index from Markdown vault."
   python - <<'PY'
-from backend.rag.indexer import RagIndexer
+from rag.shared.backend_legacy.indexer import RagIndexer
 
 count = RagIndexer().reindex_all()
 print(f"Indexed {count} Markdown chunks.")

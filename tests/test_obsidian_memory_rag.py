@@ -2,7 +2,7 @@ import tempfile
 from pathlib import Path
 import unittest
 
-from backend.rag.obsidian_memory import (
+from rag.shared.backend_legacy.obsidian_memory import (
     HashEmbeddingPipeline,
     MarkdownChunker,
     ObsidianMemoryRag,
@@ -80,7 +80,7 @@ Audit firewall logs before opening new ports.
         note = scanner.scan()
         self.assertEqual(note, [])
 
-        from backend.rag.obsidian_memory import ObsidianNote
+        from rag.shared.backend_legacy.obsidian_memory import ObsidianNote
 
         chunker = MarkdownChunker(chunk_chars=240, overlap=40)
         big_note = ObsidianNote(

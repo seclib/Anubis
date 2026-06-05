@@ -8,7 +8,7 @@ import re
 from typing import Any, Iterable, Literal
 
 from backend.agent.llm import LLM, OllamaLLM
-from backend.rag.indexer import RagIndexer
+from rag.shared.backend_legacy.indexer import RagIndexer
 from backend.skills.engine import SkillEngine, SkillProposal
 from backend.skills.parser import Skill, SkillRepository, parse_skill_markdown
 from backend.vault.service import VaultService

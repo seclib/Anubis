@@ -5,7 +5,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 
-from backend.rag.indexer import RagIndexer
+from rag.shared.backend_legacy.indexer import RagIndexer
 
 
 def main() -> None:

@@ -4,8 +4,8 @@ The RAG layer exposes retrieval and indexing over Markdown knowledge.
 
 ## Entry Points
 
-- Desktop RAG API: `backend.rag.indexer.RagIndexer`
-- Desktop retrieval API: `backend.rag.retriever.RagRetriever`
+- Desktop RAG API: `rag.shared.backend_legacy.indexer.RagIndexer`
+- Desktop retrieval API: `rag.shared.backend_legacy.retriever.RagRetriever`
 - Legacy hybrid facade: `rag.service.RAGService`
 
 ## Interface

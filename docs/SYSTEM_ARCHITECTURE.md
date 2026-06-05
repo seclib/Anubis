@@ -36,7 +36,7 @@ frontend
 
 backend
   -> backend.agent for Desktop chat adapter
-  -> backend.rag for chunk/index/search
+  -> rag.shared.backend_legacy for chunk/index/search
   -> backend.vault for safe Markdown I/O
 
 agent runtime
@@ -51,7 +51,7 @@ agent runtime
 - Launcher service manager: `desktop/src-tauri/src/service_manager.rs`
 - Backend: `backend.main:app`
 - Frontend: `desktop/src/main.tsx`
-- Desktop RAG: `backend.rag.indexer.RagIndexer`, `backend.rag.retriever.RagRetriever`
+- Desktop RAG: `rag.shared.backend_legacy.indexer.RagIndexer`, `rag.shared.backend_legacy.retriever.RagRetriever`
 - Vault: `backend.vault.service.VaultService`
 - Autonomous agent: `runtime.agent_runner.run_agent_loop`
 - Desktop chat adapter: `backend.agent.loop.AgentLoop`

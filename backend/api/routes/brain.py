@@ -13,7 +13,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from agent.multi_agent import agent_roster
 from backend.api.routes.skills import get_skills_dir
 from backend.core.config import settings
-from backend.rag.chunker import chunk_note
+from rag.shared.backend_legacy.chunker import chunk_note
 from backend.vault.service import VaultService
 
 

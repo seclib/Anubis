@@ -1,10 +1,14 @@
 import unittest
 
+from anubis.core.router import CommandRouter as CoreCommandRouter
 from cli.router import CommandRouter
 from modules.osint.schemas import AdapterExecution, IdentityReport, OsintReport
 
 
 class CommandRouterTest(unittest.TestCase):
+    def test_legacy_cli_router_exports_core_router(self) -> None:
+        self.assertIs(CommandRouter, CoreCommandRouter)
+
     def test_routes_unknown_command_to_clean_error(self) -> None:
         result = CommandRouter().route("/missing value")
 

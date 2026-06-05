@@ -1,8 +1,12 @@
 import unittest
 
-from cli_mvp.agents import AgentManager
-from cli_mvp.dsl import CommandParser
-from cli_mvp.swarm import SwarmEngine
+from anubis_cli_loader import load_unified_module
+
+
+_mvp = load_unified_module("core/mvp.py", "anubis_cli_unified_mvp_test")
+AgentManager = _mvp.AgentManager
+CommandParser = _mvp.CommandParser
+SwarmEngine = _mvp.SwarmEngine
 
 
 class AnubisCliMvpTest(unittest.TestCase):

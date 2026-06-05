@@ -1,10 +1,14 @@
 import unittest
 
+from anubis.agents import SwarmEngine as CoreSwarmEngine
 from cli.agents import AgentRegistry
 from cli.swarm import SwarmEngine
 
 
 class SwarmEngineTest(unittest.TestCase):
+    def test_legacy_cli_swarm_exports_core_engine(self) -> None:
+        self.assertIs(SwarmEngine, CoreSwarmEngine)
+
     def test_landing_page_goal_uses_ui_profile(self) -> None:
         agents = AgentRegistry()
         result = SwarmEngine(agents).run("build a landing page")

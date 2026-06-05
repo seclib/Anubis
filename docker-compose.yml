@@ -121,6 +121,86 @@ services:
     networks:
       - anubis-net
 
+  # =========================
+  # 🛡️ SECURITY TOOLING
+  # =========================
+  metasploit:
+    image: metasploitframework/metasploit-framework:latest
+    container_name: anubis-metasploit
+    restart: unless-stopped
+    profiles:
+      - exploit-tools
+    init: true
+    tty: true
+    stdin_open: true
+    command: sleep infinity
+    environment:
+      MSF_DATABASE_CONFIG: /home/msf/.msf4/database.yml
+    volumes:
+      - metasploit_data:/home/msf/.msf4
+      - metasploit_loot:/home/msf/.msf4/loot
+      - ./state/security-tools/metasploit:/workspace
+    working_dir: /workspace
+    networks:
+      - anubis-security-net
+    security_opt:
+      - no-new-privileges:true
+    cap_drop:
+      - ALL
+
+  bloodhound-neo4j:
+    image: neo4j:4.4-community
+    container_name: anubis-bloodhound-neo4j
+    restart: unless-stopped
+    profiles:
+      - graph-tools
+    environment:
+      BLOODHOUND_NEO4J_PASSWORD: "${BLOODHOUND_NEO4J_PASSWORD:-anubis-local-change-me}"
+      NEO4J_AUTH: "neo4j/${BLOODHOUND_NEO4J_PASSWORD:-anubis-local-change-me}"
+      NEO4J_dbms_allow__upgrade: "true"
+      NEO4J_dbms_default__listen__address: "0.0.0.0"
+      NEO4J_dbms_connector_bolt_listen__address: "0.0.0.0:7687"
+      NEO4J_dbms_connector_http_listen__address: "0.0.0.0:7474"
+    volumes:
+      - bloodhound_neo4j_data:/data
+      - bloodhound_neo4j_logs:/logs
+      - bloodhound_neo4j_import:/var/lib/neo4j/import
+      - bloodhound_neo4j_plugins:/plugins
+    expose:
+      - "7474"
+      - "7687"
+    networks:
+      - anubis-security-net
+    healthcheck:
+      test: ["CMD-SHELL", "cypher-shell -u neo4j -p \"$${BLOODHOUND_NEO4J_PASSWORD:-anubis-local-change-me}\" 'RETURN 1' || exit 1"]
+      interval: 20s
+      timeout: 10s
+      retries: 12
+    security_opt:
+      - no-new-privileges:true
+
+  bloodhound:
+    image: bloodhoundad/bloodhound:latest
+    container_name: anubis-bloodhound
+    restart: unless-stopped
+    profiles:
+      - graph-tools
+    depends_on:
+      bloodhound-neo4j:
+        condition: service_healthy
+    environment:
+      NEO4J_URI: bolt://bloodhound-neo4j:7687
+      NEO4J_USER: neo4j
+      NEO4J_PASSWORD: "${BLOODHOUND_NEO4J_PASSWORD:-anubis-local-change-me}"
+    volumes:
+      - bloodhound_data:/data
+    ports:
+      - "127.0.0.1:${BLOODHOUND_HTTP_PORT:-8080}:8080"
+    networks:
+      - anubis-security-net
+    security_opt:
+      - no-new-privileges:true
+
 
 # =========================
 # 💾 VOLUMES
@@ -134,6 +214,20 @@ volumes:
     name: qdrant_data
   redis_data:
     name: redis_data
+  metasploit_data:
+    name: anubis_metasploit_data
+  metasploit_loot:
+    name: anubis_metasploit_loot
+  bloodhound_data:
+    name: anubis_bloodhound_data
+  bloodhound_neo4j_data:
+    name: anubis_bloodhound_neo4j_data
+  bloodhound_neo4j_logs:
+    name: anubis_bloodhound_neo4j_logs
+  bloodhound_neo4j_import:
+    name: anubis_bloodhound_neo4j_import
+  bloodhound_neo4j_plugins:
+    name: anubis_bloodhound_neo4j_plugins
 
 
 # =========================
@@ -143,3 +237,7 @@ networks:
   anubis-net:
     name: anubis-net
     driver: bridge
+  anubis-security-net:
+    name: anubis-security-net
+    driver: bridge
+    internal: true

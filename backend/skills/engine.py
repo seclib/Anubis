@@ -9,7 +9,7 @@ from typing import Any
 
 from backend.agent.llm import LLM, OllamaLLM
 from backend.core.config import settings
-from backend.rag.indexer import RagIndexer
+from rag.shared.backend_legacy.indexer import RagIndexer
 from backend.skills.parser import SkillRepository
 from backend.vault.service import VaultService
 

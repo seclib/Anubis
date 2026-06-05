@@ -35,15 +35,15 @@ Recommendation: make `backend/` plus the Obsidian plugin the canonical product, 
 | `app/` | Legacy FastAPI entrypoint exposing OpenAI-compatible API plus crawler, RAG, Qdrant, vault, cache. | `runtime`, `retrieval`, `knowledge`, `crawler`, `services`, `workers`, `storage`. | Dockerfile still starts `app.main:app`; conflicts with `Makefile` backend target. | `main.py`, `cli/app.py`, Dockerfile. |
 | `assets/` | Icons. | SVG assets. | Useful for branding/docs, not runtime critical. | Desktop/launcher likely. |
 | `backend/` | Current canonical Python backend: FastAPI, vault, RAG/Qdrant, watcher, agent, skills, sandbox. | FastAPI, pydantic, qdrant-client, watchdog, requests. | Best aligned with target. `Makefile backend` runs `backend.main:app`; tests cover production endpoints. | `scripts/*`, tests, itself. |
-| `backend/api/routes/production.py` | `/ask`, `/sync`, `/memory`. | `backend.agent.async_loop`, `backend.rag`. | Canonical public API for target architecture. | `backend/main.py`, tests. |
-| `backend/api/routes/desktop.py` | Desktop/library/assistant convenience routes. | `backend.agent.loop`, `backend.rag`, vault. | Obsolete as desktop surface; can be merged into Obsidian plugin API or removed after migration. | `backend/main.py`, tests. |
-| `backend/api/routes/local.py` | Local file/read/write/embed/agent routes. | `backend.rag`, vault, agent. | Useful during development but duplicates production routes. | `backend/main.py`, tests. |
+| `backend/api/routes/production.py` | `/ask`, `/sync`, `/memory`. | `backend.agent.async_loop`, `rag.shared.backend_legacy`. | Canonical public API for target architecture. | `backend/main.py`, tests. |
+| `backend/api/routes/desktop.py` | Desktop/library/assistant convenience routes. | `backend.agent.loop`, `rag.shared.backend_legacy`, vault. | Obsolete as desktop surface; can be merged into Obsidian plugin API or removed after migration. | `backend/main.py`, tests. |
+| `backend/api/routes/local.py` | Local file/read/write/embed/agent routes. | `rag.shared.backend_legacy`, vault, agent. | Useful during development but duplicates production routes. | `backend/main.py`, tests. |
 | `backend/api/routes/brain.py` | React desktop dashboard snapshot/log/WebSocket surface. | `agent.multi_agent`, skill graph, Qdrant status. | Desktop-specific and imports legacy `agent`. | `backend/main.py`, tests. |
 | `backend/api/routes/skills.py` | Skill graph API. | legacy `agent.skill_ecosystem_graph`. | Useful concept, wrong dependency boundary. | `backend/main.py`, `brain.py`, tests. |
-| `backend/agent/` | Current local agent loop, async planner/executor/critic loop, LLM adapter, tools, meta-agent. | `backend.rag`, `backend.vault`, `backend.skills`, `backend.tools`. | Keep as reasoning layer. | `backend/api/routes/*`, scripts. |
+| `backend/agent/` | Current local agent loop, async planner/executor/critic loop, LLM adapter, tools, meta-agent. | `rag.shared.backend_legacy`, `backend.vault`, `backend.skills`, `backend.tools`. | Keep as reasoning layer. | `backend/api/routes/*`, scripts. |
 | `backend/rag/` | Current chunk/embed/index/search Qdrant integration. | qdrant-client, requests/Ollama, vault. | Keep as memory layer. | `backend.agent`, `backend.api`, watcher, scripts. |
-| `backend/vault/` | File-based vault service and markdown section parsing. | `backend.core`. | Keep as file truth adapter. | `backend.rag`, `backend.agent`, routes. |
-| `backend/watcher/` | Watchdog Markdown watcher and incremental sync state. | watchdog, `backend.rag`. | Keep for real-time Obsidian ingestion. | `backend.main`, scripts. |
+| `backend/vault/` | File-based vault service and markdown section parsing. | `backend.core`. | Keep as file truth adapter. | `rag.shared.backend_legacy`, `backend.agent`, routes. |
+| `backend/watcher/` | Watchdog Markdown watcher and incremental sync state. | watchdog, `rag.shared.backend_legacy`. | Keep for real-time Obsidian ingestion. | `backend.main`, scripts. |
 | `backend/skills/` | Markdown skill repository and skill-generation engine. | vault, RAG, LLM. | Keep/refactor into memory/agent layer. | `backend.agent`, scripts. |
 | `backend/tools/` | Minimal sandbox executor. | config, paths. | Keep if agents can call shell/tools; otherwise isolate behind explicit permission. | `backend.agent.tools`, `backend.agent.multi_agent`. |
 | `cli/` | Legacy terminal UI for root runtime. | `app.main`, `runtime`, `memory`, `llm`. | Obsolete if Obsidian plugin is primary UI. | `anubis_cli.py`, tests indirectly. |
@@ -236,19 +236,19 @@ Canonical target graph:
 flowchart TD
   Obsidian[Obsidian Vault] --> Watcher[backend.watcher]
   ObsidianPlugin[Obsidian Plugin] --> FastAPI[backend.main FastAPI]
-  Watcher --> Ingestion[backend.rag.indexer]
+  Watcher --> Ingestion[rag.shared.backend_legacy.indexer]
   FastAPI --> ProductionRoutes[backend.api.routes.production]
   ProductionRoutes --> Agent[backend.agent.async_loop]
-  ProductionRoutes --> Retriever[backend.rag.retriever]
+  ProductionRoutes --> Retriever[rag.shared.backend_legacy.retriever]
   ProductionRoutes --> Ingestion
   Agent --> PlannerExecutorCritic[backend.agent.multi_agent]
   PlannerExecutorCritic --> Tools[backend.agent.tools]
   Tools --> Vault[backend.vault]
   Tools --> Retriever
-  Ingestion --> Chunker[backend.rag.chunker]
-  Ingestion --> QdrantStore[backend.rag.qdrant_store]
+  Ingestion --> Chunker[rag.shared.backend_legacy.chunker]
+  Ingestion --> QdrantStore[rag.shared.backend_legacy.qdrant_store]
   Retriever --> QdrantStore
-  QdrantStore --> Embedder[backend.rag.embedder]
+  QdrantStore --> Embedder[rag.shared.backend_legacy.embedder]
   QdrantStore --> Qdrant[(Qdrant)]
   Embedder --> Ollama[(Ollama embeddings)]
   Agent --> Vault

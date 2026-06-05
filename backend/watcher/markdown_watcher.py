@@ -13,7 +13,7 @@ from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
 
 from backend.core.config import settings
-from backend.rag.indexer import RagIndexer
+from rag.shared.backend_legacy.indexer import RagIndexer
 
 
 logger = logging.getLogger("anubis.watcher")

@@ -114,7 +114,7 @@ This is the largest remaining cognitive-load issue. The next consolidation shoul
 Recommended direction:
 
 - Keep `anubis` as the package name.
-- Migrate `backend.api`, `backend.rag`, `backend.vault`, and `backend.tools` into `anubis` in staged, test-backed moves.
+- Migrate `backend.api`, `rag.shared.backend_legacy`, `backend.vault`, and `backend.tools` into `anubis` in staged, test-backed moves.
 - Do not create new abstraction layers during that migration.
 
 ### 2. Too Many Agent Systems
@@ -218,7 +218,7 @@ Recommended direction:
 
 - Migrate `backend` modules into `anubis` in small PRs:
   - `backend.vault` -> `anubis.workspace`
-  - `backend.rag` -> `anubis.memory` or `anubis.retrieval`
+  - `rag.shared.backend_legacy` -> `anubis.memory` or `anubis.retrieval`
   - `backend.tools` -> `anubis.tools`
   - `backend.api` -> `anubis.api`
 - Update imports mechanically.

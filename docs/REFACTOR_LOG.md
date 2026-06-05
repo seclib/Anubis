@@ -111,7 +111,7 @@ Compatibility adapters:
 - `anubis/application/agents/executor.py` delegates to `backend.agent.executor`.
 - `anubis/application/agents/verifier.py` delegates to `backend.agent.verifier`.
 - `anubis/application/tools/tool_service.py` delegates to `backend.tools.invoke_tool`.
-- `anubis/application/memory/ingestion_service.py` delegates to `backend.rag.indexer.RagIndexer`.
+- `anubis/application/memory/ingestion_service.py` delegates to `rag.shared.backend_legacy.indexer.RagIndexer`.
 - `anubis/application/memory/context_service.py` delegates to `backend.context.engine.ContextEngine`.
 - `anubis/application/workspace/vault_service.py` delegates to `backend.vault.service.VaultService`.
 
@@ -136,7 +136,7 @@ Responsibilities added:
 
 Compatibility adapters:
 
-- `anubis/infrastructure/vector_store/qdrant.py` delegates to `backend.rag.qdrant_store.QdrantStore`.
+- `anubis/infrastructure/vector_store/qdrant.py` delegates to `rag.shared.backend_legacy.qdrant_store.QdrantStore`.
 - `anubis/infrastructure/process/sandbox.py` delegates to `backend.tools.sandbox`.
 - `anubis/infrastructure/filesystem/*` delegates to backend filesystem/vault/watcher implementations.
 - `anubis/infrastructure/git/cli_git.py` delegates to backend git tools.
@@ -362,11 +362,11 @@ PY
 Initial result:
 
 - Failed on `anubis.application.memory.ingestion_service`.
-- Cause: adapter referenced non-existent `backend.rag.indexer.VaultIndexer`.
+- Cause: adapter referenced non-existent `rag.shared.backend_legacy.indexer.VaultIndexer`.
 
 Fix:
 
-- Changed adapter to import `backend.rag.indexer.RagIndexer`.
+- Changed adapter to import `rag.shared.backend_legacy.indexer.RagIndexer`.
 
 Final result:
 

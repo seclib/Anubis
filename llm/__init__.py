@@ -1,6 +1,3 @@
-"""Stateless LLM clients.
+from anubis.llm.ollama import OllamaClient, OllamaRouter, RoutedModel
 
-Import provider functions from concrete modules such as ``llm.ollama``.
-"""
-
-__all__: list[str] = []
+__all__ = ["OllamaClient", "OllamaRouter", "RoutedModel"]

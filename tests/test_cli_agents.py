@@ -1,9 +1,13 @@
 import unittest
 
+from anubis.agents import AgentRegistry as CoreAgentRegistry
 from cli.agents import AgentRegistry
 
 
 class AgentRegistryTest(unittest.TestCase):
+    def test_legacy_cli_agents_exports_core_registry(self) -> None:
+        self.assertIs(AgentRegistry, CoreAgentRegistry)
+
     def test_initializes_core_agents(self) -> None:
         registry = AgentRegistry()
 

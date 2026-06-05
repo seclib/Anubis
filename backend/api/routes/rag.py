@@ -3,8 +3,8 @@ from functools import lru_cache
 from fastapi import APIRouter
 from pydantic import BaseModel, Field
 
-from backend.rag.indexer import RagIndexer
-from backend.rag.retriever import RagRetriever
+from rag.shared.backend_legacy.indexer import RagIndexer
+from rag.shared.backend_legacy.retriever import RagRetriever
 
 
 router = APIRouter()
