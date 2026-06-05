@@ -1,0 +1,56 @@
+{
+  "generated_at": "2026-06-05T08:28:00+00:00",
+  "release_decision": "MERGE",
+  "deployment_mode": "staging_simulation_plus_canary_approval",
+  "scores": {
+    "test_score": 100,
+    "stability_score": 96,
+    "security_score": 82,
+    "performance_score": 90,
+    "overall_release_score": 92
+  },
+  "validation_history": [
+    {
+      "stage": "local_validation",
+      "status": "passed",
+      "checks": [
+        "pytest -q",
+        "import canary",
+        "cli status",
+        "secret scan",
+        "docker compose config"
+      ]
+    },
+    {
+      "stage": "build",
+      "status": "passed",
+      "checks": [
+        "scripts/check.sh",
+        "npm run build"
+      ]
+    },
+    {
+      "stage": "staging_simulation",
+      "status": "passed",
+      "checks": [
+        "main.py ingest-demo",
+        "main.py query webhook --top-k 2 --json",
+        "focused canary test set"
+      ]
+    },
+    {
+      "stage": "canary",
+      "status": "approved_simulated",
+      "checks": [
+        "no crash signals",
+        "no test regressions",
+        "no deployment-blocking security alerts"
+      ]
+    }
+  ],
+  "release_notes": [
+    "Runtime and build validation are stable.",
+    "Production deployment should remain controlled because duplicate runtime paths and legacy side-effect call sites remain.",
+    "No rollback was required."
+  ]
+}

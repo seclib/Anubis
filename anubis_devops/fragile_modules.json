@@ -1,0 +1,48 @@
+{
+  "generated_at": "2026-06-05T08:28:00+00:00",
+  "fragile_modules": [
+    {
+      "module": "rag",
+      "risk": "high",
+      "reason": "Legacy self-reexport stubs and restored compatibility adapters coexist with shared RAG services.",
+      "recommended_action": "Consolidate under one KnowledgeService pipeline."
+    },
+    {
+      "module": "tools",
+      "risk": "high",
+      "reason": "Multiple tool gateways and direct subprocess call sites remain.",
+      "recommended_action": "Force all side effects through ToolService, SecurityService, PermissionService, and SandboxExecutor."
+    },
+    {
+      "module": "backend.tools",
+      "risk": "medium",
+      "reason": "Backend tool implementations overlap with root tools and sandbox modules.",
+      "recommended_action": "Convert backend tools to thin adapters."
+    },
+    {
+      "module": "cli",
+      "risk": "medium",
+      "reason": "Several CLI entrypoints and compatibility routers are active.",
+      "recommended_action": "Keep cli/main.py as the only production entrypoint and mark others compatibility-only."
+    },
+    {
+      "module": "agent",
+      "risk": "medium",
+      "reason": "Root agent loop, core agent loop, backend agents, and distributed agents overlap.",
+      "recommended_action": "Select one canonical planner-executor-reviewer loop and migrate adapters gradually."
+    },
+    {
+      "module": "api",
+      "risk": "medium",
+      "reason": "app/main.py and backend/main.py both expose runtime surfaces.",
+      "recommended_action": "Declare one production API and route the other through compatibility wrappers."
+    }
+  ],
+  "most_effective_agents": [
+    "TEST_AGENT",
+    "DEBUG_AGENT",
+    "SECURITY_GUARD",
+    "RELEASE_ENGINE"
+  ],
+  "autonomy_score": 88
+}

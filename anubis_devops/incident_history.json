@@ -1,0 +1,40 @@
+{
+  "generated_at": "2026-06-05T08:28:00+00:00",
+  "system": "ANUBIS SWARM v4",
+  "release_candidate": "anubis/swarm-v4-devops",
+  "incidents": [
+    {
+      "id": "SWARM-V4-ARCH-001",
+      "type": "ARCHITECTURE_MISMATCH",
+      "severity": "medium",
+      "status": "known_risk",
+      "summary": "Duplicate CLI, API, agent, RAG, and tool paths remain after stabilization.",
+      "action": "Hold broad consolidation for a dedicated AGENTS.md migration wave."
+    },
+    {
+      "id": "SWARM-V4-SEC-001",
+      "type": "SECURITY_VIOLATION",
+      "severity": "low",
+      "status": "monitored",
+      "summary": "Direct subprocess and network call sites remain in legacy tool and infrastructure modules.",
+      "action": "No new high-risk path detected in this release; require ToolService consolidation before production autonomy."
+    },
+    {
+      "id": "SWARM-V4-DEPLOY-001",
+      "type": "CONFIG_ERROR",
+      "severity": "low",
+      "status": "mitigated",
+      "summary": "Qdrant was unavailable during staging simulation.",
+      "action": "RAG local fallback handled ingest and query successfully."
+    }
+  ],
+  "green_signals": [
+    "pytest: 416 passed",
+    "scripts/check.sh: 416 tests OK",
+    "npm run build: pass",
+    "docker compose config --quiet: pass",
+    "CLI status canary: pass",
+    "RAG staging simulation: pass"
+  ],
+  "rollback_required": false
+}
