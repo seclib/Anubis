@@ -1,0 +1,332 @@
+x-python-service-defaults: &python-service-defaults
+  user: "10001:10001"
+  read_only: true
+  cap_drop:
+    - ALL
+  security_opt:
+    - no-new-privileges:true
+  tmpfs:
+    - /tmp:rw,noexec,nosuid,nodev,size=32m,uid=10001,gid=10001,mode=1777
+  deploy:
+    restart_policy:
+      condition: on-failure
+      delay: 5s
+      max_attempts: 3
+      window: 60s
+    update_config:
+      parallelism: 1
+      delay: 10s
+      order: start-first
+      failure_action: rollback
+    rollback_config:
+      parallelism: 1
+      delay: 10s
+      order: stop-first
+    resources:
+      reservations:
+        cpus: "0.10"
+        memory: 64M
+      limits:
+        cpus: "0.75"
+        memory: 256M
+
+services:
+  anubis-ui:
+    <<: *python-service-defaults
+    image: anubis-ui:local
+    environment:
+      ANUBIS_ENV: production
+      ANUBIS_SERVICE: ui
+      ANUBIS_CORE_URL: http://anubis-core:8080
+    ports:
+      - target: 8080
+        published: 8080
+        protocol: tcp
+        mode: ingress
+    networks:
+      - anubis-public
+      - anubis-control
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import pathlib; assert pathlib.Path('/app/ui/index.html').exists()"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+      resources:
+        reservations:
+          cpus: "0.05"
+          memory: 64M
+        limits:
+          cpus: "0.50"
+          memory: 128M
+
+  anubis-core:
+    <<: *python-service-defaults
+    image: anubis-core:local
+    entrypoint: ["python3", "-c"]
+    command:
+      - "from core.graph import GraphOrchestrator; GraphOrchestrator.build(); print('anubis-core ready'); import time; time.sleep(31536000)"
+    environment:
+      ANUBIS_ENV: production
+      ANUBIS_SERVICE: core
+      ANUBIS_STATE_MODE: stateless
+      ANUBIS_MEMORY_URL: http://anubis-memory:6333
+      ANUBIS_RAG_URL: http://anubis-rag:8080
+      ANUBIS_GIT_URL: http://anubis-git:8080
+      ANUBIS_SANDBOX_URL: http://anubis-sandbox:8080
+      ANUBIS_NETWORK: internal
+      ANUBIS_SANDBOX: enforced
+    networks:
+      - anubis-control
+      - anubis-data
+      - anubis-execution
+    healthcheck:
+      test: ["CMD", "python3", "-c", "from core.graph import GraphOrchestrator; GraphOrchestrator.build()"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+      update_config:
+        parallelism: 1
+        delay: 15s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+      resources:
+        reservations:
+          cpus: "0.15"
+          memory: 128M
+        limits:
+          cpus: "1.00"
+          memory: 384M
+
+  anubis-memory:
+    image: qdrant/qdrant@sha256:45f8e3ddc2570a4d029877e1b5ec1045c19b3852b4e22a55c7f43b05aea0ca89
+    environment:
+      QDRANT__SERVICE__HTTP_PORT: "6333"
+      QDRANT__SERVICE__GRPC_PORT: "6334"
+      QDRANT__LOG_LEVEL: INFO
+    volumes:
+      - anubis-qdrant-data:/qdrant/storage
+    networks:
+      - anubis-data
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1:6333/healthz || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 10s
+        max_attempts: 5
+        window: 120s
+      update_config:
+        parallelism: 1
+        delay: 30s
+        order: stop-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 30s
+        order: stop-first
+      placement:
+        constraints:
+          - node.labels.anubis.memory == true
+      resources:
+        reservations:
+          cpus: "0.25"
+          memory: 256M
+        limits:
+          cpus: "2.00"
+          memory: 2G
+
+  anubis-rag:
+    <<: *python-service-defaults
+    image: anubis-rag:local
+    environment:
+      ANUBIS_ENV: production
+      ANUBIS_SERVICE: rag
+      ANUBIS_QDRANT_URL: http://anubis-memory:6333
+      ANUBIS_MEMORY_URL: http://anubis-memory:6333
+      ANUBIS_NETWORK: internal
+    networks:
+      - anubis-data
+    healthcheck:
+      test: ["CMD", "python3", "-c", "from anubis.retrieval import QueryRouter"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 96M
+        limits:
+          cpus: "1.00"
+          memory: 384M
+
+  anubis-git:
+    <<: *python-service-defaults
+    image: anubis-git:local
+    environment:
+      ANUBIS_ENV: production
+      ANUBIS_SERVICE: git
+      ANUBIS_NETWORK: disabled
+      ANUBIS_WORKSPACE_ROOT: /workspaces
+    volumes:
+      - anubis-git-workspaces:/workspaces
+    networks:
+      - anubis-execution
+    healthcheck:
+      test: ["CMD", "python3", "-c", "from anubis.architecture import RefactorProposal"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 1
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+      update_config:
+        parallelism: 1
+        delay: 15s
+        order: stop-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+      placement:
+        constraints:
+          - node.labels.anubis.git == true
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 96M
+        limits:
+          cpus: "1.00"
+          memory: 384M
+
+  anubis-sandbox:
+    <<: *python-service-defaults
+    image: anubis-sandbox:local
+    environment:
+      ANUBIS_ENV: production
+      ANUBIS_SERVICE: sandbox
+      ANUBIS_NETWORK: disabled
+      ANUBIS_SANDBOX: enforced
+      ANUBIS_HOST_ACCESS: denied
+    networks:
+      - anubis-execution
+    healthcheck:
+      test: ["CMD", "python3", "-c", "from core.execution import SandboxRunner"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
+    deploy:
+      replicas: 2
+      restart_policy:
+        condition: on-failure
+        delay: 5s
+        max_attempts: 3
+        window: 60s
+      update_config:
+        parallelism: 1
+        delay: 10s
+        order: start-first
+        failure_action: rollback
+      rollback_config:
+        parallelism: 1
+        delay: 10s
+        order: stop-first
+      resources:
+        reservations:
+          cpus: "0.10"
+          memory: 96M
+        limits:
+          cpus: "1.00"
+          memory: 384M
+
+networks:
+  anubis-public:
+    driver: overlay
+    attachable: false
+    driver_opts:
+      encrypted: "true"
+
+  anubis-control:
+    driver: overlay
+    internal: true
+    attachable: false
+    driver_opts:
+      encrypted: "true"
+
+  anubis-data:
+    driver: overlay
+    internal: true
+    attachable: false
+    driver_opts:
+      encrypted: "true"
+
+  anubis-execution:
+    driver: overlay
+    internal: true
+    attachable: false
+    driver_opts:
+      encrypted: "true"
+
+volumes:
+  anubis-qdrant-data:
+    driver: local
+
+  anubis-git-workspaces:
+    driver: local
